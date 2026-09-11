@@ -118,9 +118,8 @@ npm start
 
 **이미 Vercel을 쓰고 계신 경우** 이 방법으로 배포하세요. Vercel은 파일 저장이 안 되는 구조라, 데이터 저장소로 **Upstash Redis**(Vercel Marketplace에서 설치하는 저장소, 별도 서버 설치 없이 프로젝트에 "연결"만 하면 됩니다 — Vercel의 기존 "Vercel KV"는 서비스가 종료되고 이 방식으로 대체되었습니다)를 함께 붙입니다. 코드는 이미 이 연동을 자동으로 감지해서 쓰도록 만들어져 있습니다 (환경변수만 연결하면 끝).
 
-1. **GitHub에 코드 올리기**: https://github.com → 새 저장소 생성 → 이 폴더 업로드 (`.env` 제외). `api` 폴더와 그 안의 `[...path].js` 파일도 반드시 포함해야 합니다 (Vercel이 서버 코드를 인식하는 부분입니다)
-2. **Vercel에서 프로젝트 가져오기**: https://vercel.com 로그인 → "Add New" → "Project" → 방금 만든 GitHub 저장소 선택 → Import
-   - **Framework Preset을 반드시 "Other"로 명시적으로 선택**하세요 (자동 감지된 값을 그대로 두면 "entrypoint를 찾을 수 없다"는 오류가 날 수 있습니다). Import 화면 또는 배포 후 Settings → General → Build and Development Settings에서 확인/변경할 수 있습니다
+1. **GitHub에 코드 올리기**: https://github.com → 새 저장소 생성 → 이 폴더 업로드 (`.env` 제외). `vercel.json`이나 `api` 폴더는 필요 없습니다 — Vercel이 Express 앱을 자동으로 인식합니다
+2. **Vercel에서 프로젝트 가져오기**: https://vercel.com 로그인 → "Add New" → "Project" → 방금 만든 GitHub 저장소 선택 → Import → 그대로 "Deploy" (Framework Preset이 자동으로 "Express"로 인식되면 그대로 두세요 — 억지로 "Other"로 바꾸지 마세요)
 3. **Upstash Redis 만들기**: 프로젝트 대시보드 → "Storage" 탭(또는 "Integrations") → "Create Database"(또는 "Browse Marketplace") → **Upstash**(Redis) 선택 → 이름 정하고 생성
 4. **프로젝트에 연결**: 생성 과정에서 방금 만든 프로젝트를 선택해 연결하면 `KV_REST_API_URL`, `KV_REST_API_TOKEN` (또는 `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`) 환경변수가 **자동으로** 프로젝트에 추가됩니다 — 코드가 두 가지 이름 모두 인식하므로 어느 쪽이든 상관없습니다
 5. **나머지 환경변수 추가** (프로젝트 → Settings → Environment Variables)
@@ -133,7 +132,9 @@ npm start
 7. 배포가 끝나면 `https://프로젝트이름.vercel.app` 링크가 생깁니다
 8. 문자코리아 "연동IP 등록" 페이지에 이 배포 서버의 IP를 등록해야 발송이 됩니다 (Vercel 서버 IP는 매번 달라질 수 있어서, 안내 문서의 "고정 아웃바운드 IP" 기능을 함께 확인해보시는 걸 추천드려요 — Vercel 대시보드에서 "고정 IP" 관련 설정을 찾아보시거나 필요하면 말씀해주세요)
 
-> 참고: KV 연결 없이 배포하면 파일 저장 방식으로 자동 전환되긴 하지만, Vercel 환경에서는 재요청마다 파일이 사라지므로 **KV 연결은 필수**입니다.
+> 참고: KV 연결 없이 배포하면 파일 저장 방식으로 자동 전환되긴 하지만, Vercel 환경에서는 재요청마다 파일이 사라지므로 **Redis 연결은 필수**입니다.
+
+> **이전에 vercel.json이나 api 폴더를 GitHub에 올리셨다면 삭제해주세요.** Vercel이 Express 앱을 자동으로 인식하는 최신 방식으로 바뀌면서 더 이상 필요 없고, 오히려 있으면 자동 인식을 방해할 수 있습니다.
 
 ## 참고: 문자코리아 API 동작 방식
 
