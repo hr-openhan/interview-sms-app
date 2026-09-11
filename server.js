@@ -8,19 +8,23 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ---------- 저장소 계층 ----------
-// Vercel KV 환경변수(KV_REST_API_URL/TOKEN)가 있으면 Vercel KV(영구 저장, 서버리스에서도 안전)를 쓰고,
+// Vercel의 Redis 연동(Upstash, Marketplace에서 설치)이 연결되어 있으면 그걸 쓰고,
 // 없으면(로컬 실행, Render 등) 지금까지처럼 로컬 파일(JSON)에 저장합니다.
+// 연동 방식에 따라 KV_REST_API_URL/TOKEN 또는 UPSTASH_REDIS_REST_URL/TOKEN 둘 중 하나로 값이 들어오므로 둘 다 확인합니다.
 let kv = null;
-if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+if (REDIS_URL && REDIS_TOKEN) {
   try {
-    kv = require('@vercel/kv').kv;
+    const { Redis } = require('@upstash/redis');
+    kv = new Redis({ url: REDIS_URL, token: REDIS_TOKEN });
   } catch {
     kv = null;
   }
 }
 
 // DATA_DIR을 지정하면 그 위치(예: Render의 영구 디스크 마운트 경로)에 파일을 저장합니다.
-// 지정하지 않으면 이 앱 폴더 안에 저장됩니다. (KV를 쓰는 경우엔 이 값은 쓰이지 않습니다.)
+// 지정하지 않으면 이 앱 폴더 안에 저장됩니다. (Redis를 쓰는 경우엔 이 값은 쓰이지 않습니다.)
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 if (!kv && !fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -60,7 +64,7 @@ app.get('/api/smsko-check', async (req, res) => {
   };
 
   const result = {
-    storageMode: kv ? 'vercel-kv' : 'local-file',
+    storageMode: kv ? 'upstash-redis' : 'local-file',
     envLoaded: {
       SMSKO_USER_ID: SMSKO_USER_ID || null,
       SMSKO_USER_ID_length: SMSKO_USER_ID ? SMSKO_USER_ID.length : 0,
@@ -439,7 +443,7 @@ app.delete('/api/schedules/:id', async (req, res) => {
 // Vercel은 이 파일을 require해서 서버리스 함수로 쓰므로 app.listen을 호출하지 않습니다.
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`면접 문자 발송 앱이 http://localhost:${PORT} 에서 실행 중입니다. (저장 방식: ${kv ? 'Vercel KV' : '로컬 파일'})`);
+    console.log(`면접 문자 발송 앱이 http://localhost:${PORT} 에서 실행 중입니다. (저장 방식: ${kv ? 'Upstash Redis' : '로컬 파일'})`);
   });
 }
 
