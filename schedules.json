@@ -1,0 +1,15 @@
+[
+  {
+    "id": "s1",
+    "name": "양지연",
+    "phone": "01012345678",
+    "interviewAt": "2026-09-10T10:30",
+    "team": "경영지원팀",
+    "interviewer": "카라",
+    "location": "오픈한웍스",
+    "round": "1차",
+    "note": "",
+    "status": "미응답",
+    "createdAt": "2026-09-10T11:22:05.978Z"
+  }
+]
