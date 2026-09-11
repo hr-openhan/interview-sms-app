@@ -118,9 +118,9 @@ npm start
 
 **이미 Vercel을 쓰고 계신 경우** 이 방법으로 배포하세요. Vercel은 파일 저장이 안 되는 구조라, 데이터 저장소로 **Vercel KV**(Vercel에서 제공하는 저장소, 별도 서버 설치 없이 프로젝트에 "연결"만 하면 됩니다)를 함께 붙입니다. 코드는 이미 Vercel KV를 자동으로 감지해서 쓰도록 만들어져 있습니다 (환경변수만 연결하면 끝).
 
-1. **GitHub에 코드 올리기**: https://github.com → 새 저장소 생성 → 이 폴더 업로드 (`.env` 제외)
+1. **GitHub에 코드 올리기**: https://github.com → 새 저장소 생성 → 이 폴더 업로드 (`.env` 제외). `api` 폴더와 그 안의 `[...path].js` 파일도 반드시 포함해야 합니다 (Vercel이 서버 코드를 인식하는 부분입니다)
 2. **Vercel에서 프로젝트 가져오기**: https://vercel.com 로그인 → "Add New" → "Project" → 방금 만든 GitHub 저장소 선택 → Import
-   - Framework Preset은 "Other"로 두면 됩니다 (이미 `vercel.json`이 포함되어 있어 자동으로 인식됩니다)
+   - Framework Preset은 "Other"로 두면 됩니다. `vercel.json`은 화면(정적 파일)이 있는 위치만 알려주는 최소 설정이고, `api/[...path].js` 파일 덕분에 Vercel이 서버 코드를 자동으로 인식합니다
 3. **Vercel KV 만들기**: 프로젝트 대시보드 → "Storage" 탭 → "Create Database" → **KV** 선택 → 이름 정하고 생성
 4. **KV를 프로젝트에 연결**: 생성한 KV의 "Connect Project" 버튼 클릭 → 방금 만든 프로젝트 선택 → 연결하면 `KV_REST_API_URL`, `KV_REST_API_TOKEN` 등의 환경변수가 **자동으로** 프로젝트에 추가됩니다
 5. **나머지 환경변수 추가** (프로젝트 → Settings → Environment Variables)
