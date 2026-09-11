@@ -32,8 +32,17 @@ if (!kv && !fs.existsSync(DATA_DIR)) {
 
 async function storeGet(key, filePath, defaultValue) {
   if (kv) {
-    const val = await kv.get(key);
-    return val ?? defaultValue;
+    try {
+      const val = await kv.get(key);
+      // 배열인데 비어있으면(예: 실수/오류로 전부 지워진 경우) 기본값으로 되돌립니다.
+      if (Array.isArray(val) && val.length === 0 && Array.isArray(defaultValue) && defaultValue.length > 0) {
+        return defaultValue;
+      }
+      return val ?? defaultValue;
+    } catch (err) {
+      console.error(`[storeGet:${key}] Redis 조회 실패, 기본값으로 대체:`, err.message);
+      return defaultValue;
+    }
   }
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -44,7 +53,12 @@ async function storeGet(key, filePath, defaultValue) {
 
 async function storeSet(key, filePath, value) {
   if (kv) {
-    await kv.set(key, value);
+    try {
+      await kv.set(key, value);
+    } catch (err) {
+      console.error(`[storeSet:${key}] Redis 저장 실패:`, err.message);
+      throw err;
+    }
     return;
   }
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf-8');
@@ -54,6 +68,33 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 문자코리아 연결 진단 (.env에 저장된 값이 실제로 어떻게 읽히는지, 토큰 발급이 되는지 확인)
+// 저장소(Redis 또는 로컬 파일) 상태 진단 - 브라우저 주소창에 /api/storage-check 입력하면 바로 확인 가능
+app.get('/api/storage-check', async (req, res) => {
+  const result = {
+    storageMode: kv ? 'upstash-redis' : 'local-file',
+    redisEnvDetected: !!(REDIS_URL && REDIS_TOKEN),
+  };
+
+  if (kv) {
+    try {
+      await kv.set('__healthcheck__', { ok: true, ts: Date.now() });
+      const readBack = await kv.get('__healthcheck__');
+      result.redisRoundTrip = { ok: true, readBack };
+    } catch (err) {
+      result.redisRoundTrip = { ok: false, error: err.message };
+    }
+  }
+
+  try {
+    const templates = await loadTemplates();
+    result.templatesCount = Array.isArray(templates) ? templates.length : `배열 아님: ${typeof templates}`;
+  } catch (err) {
+    result.templatesError = err.message;
+  }
+
+  res.json(result);
+});
+
 app.get('/api/smsko-check', async (req, res) => {
   const { SMSKO_USER_ID, SMSKO_API_KEY, SMSKO_SENDER } = process.env;
 

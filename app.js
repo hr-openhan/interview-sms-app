@@ -56,15 +56,25 @@ let templates = [];
 let schedules = [];
 
 async function loadTemplates() {
-  const res = await fetch('/api/templates');
-  templates = await res.json();
-  templateSelect.innerHTML = '<option value="">양식을 선택하세요</option>';
-  templates.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.id;
-    opt.textContent = t.label;
-    templateSelect.appendChild(opt);
-  });
+  templateSelect.innerHTML = '<option value="">불러오는 중...</option>';
+  try {
+    const res = await fetch('/api/templates');
+    const data = await res.json();
+    if (!Array.isArray(data)) {
+      throw new Error((data && data.error) || '서버 응답 형식이 올바르지 않습니다.');
+    }
+    templates = data;
+    templateSelect.innerHTML = '<option value="">양식을 선택하세요</option>';
+    templates.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.label;
+      templateSelect.appendChild(opt);
+    });
+  } catch (err) {
+    templates = [];
+    templateSelect.innerHTML = `<option value="">양식을 불러오지 못했습니다 (${err.message})</option>`;
+  }
 }
 
 function currentTemplate() {
