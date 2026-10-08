@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const Anthropic = require('@anthropic-ai/sdk');
 
 // Fixie(고정 IP 프록시)가 연결되어 있으면 문자코리아 API 호출을 이 프록시를 거쳐서 보냅니다.
 // 이렇게 하면 배포 환경(Vercel/Render 등)의 유동 IP 대신, Fixie의 고정 IP로만 요청이 나갑니다.
@@ -12,6 +13,70 @@ const proxyAgent = FIXIE_URL ? new HttpsProxyAgent(FIXIE_URL) : null;
 function withProxy(axiosConfig = {}) {
   if (!proxyAgent) return axiosConfig;
   return { ...axiosConfig, httpAgent: proxyAgent, httpsAgent: proxyAgent, proxy: false };
+}
+
+// ---------- 문자에 쓸 수 없는 글자 처리 ----------
+// 국내 문자 발송은 EUC-KR 계열 글자만 보낼 수 있어서, 복사/붙여넣기로 딸려온
+// "눈에 안 보이는 특수 공백(NBSP, U+00A0)" 등이 있으면 발송불가문자(errCode 2039)로 거부됩니다.
+// → 안전하게 바꿀 수 있는 글자는 자동으로 바꾸고, 바꿀 수 없는 글자(이모지 등)는 미리 알려줍니다.
+const SMS_FIXES = [
+  { re: /[\u00A0\u1680\u2000-\u200A\u202F\u205F]/g, to: ' ',  desc: '눈에 안 보이는 특수 공백 → 일반 공백' },
+  { re: /[\u200B-\u200D\u2060\uFEFF\u00AD]/g,        to: '',   desc: '폭 없는 숨은 글자 → 삭제' },
+  { re: /[\u2028\u2029]/g,                            to: '\n', desc: '특수 줄바꿈 → 줄바꿈' },
+  { re: /[\u2013\u2014\u2212]/g,                      to: '-',  desc: '긴 줄표(—, –) → 하이픈(-)' },
+  { re: /\u2022/g,                                    to: '·',  desc: '글머리 기호(•) → 가운뎃점(·)' },
+  { re: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, to: '', desc: '제어 문자 → 삭제' },
+];
+
+// 실제로 보낼 수 있는 글자 목록 (EUC-KR/CP949로 표현 가능한 글자) — 서버 시작 시 한 번 만듭니다.
+const SMS_ALLOWED = (() => {
+  const set = new Set();
+  for (let c = 0x20; c < 0x7f; c++) set.add(String.fromCharCode(c));
+  set.add('\n'); set.add('\r'); set.add('\t');
+  // 한글 음절 11,172자는 전부 허용: 드문 글자가 들어간 이름을 잘못 막지 않기 위해서입니다.
+  // (업체가 거부하면 오류 문구에 정확한 글자가 나옵니다)
+  for (let c = 0xAC00; c <= 0xD7A3; c++) set.add(String.fromCharCode(c));
+  try {
+    const dec = new TextDecoder('euc-kr');
+    for (let a = 0x81; a <= 0xfe; a++) {
+      for (let b = 0x41; b <= 0xfe; b++) {
+        const ch = dec.decode(new Uint8Array([a, b]));
+        if (ch.length === 1 && ch !== '\uFFFD') set.add(ch);
+      }
+    }
+  } catch (e) {
+    console.error('EUC-KR 글자표를 만들지 못했습니다. 글자 검사는 건너뜁니다:', e.message);
+    return null;
+  }
+  return set;
+})();
+
+function sanitizeSms(input) {
+  let text = String(input ?? '');
+  const fixes = [];
+  for (const f of SMS_FIXES) {
+    const found = text.match(f.re);
+    if (found && found.length) {
+      fixes.push({ desc: f.desc, count: found.length });
+      text = text.replace(f.re, f.to);
+    }
+  }
+  // 자동으로 바꿀 수 없는데 보낼 수도 없는 글자(이모지 등) 찾기
+  const invalid = [];
+  if (SMS_ALLOWED) {
+    const seen = new Map();
+    for (const ch of text) {
+      if (SMS_ALLOWED.has(ch)) continue;
+      const cp = 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+      if (seen.has(ch)) seen.get(ch).count++;
+      else { const item = { char: ch, codePoint: cp, count: 1 }; seen.set(ch, item); invalid.push(item); }
+    }
+  }
+  return { text, fixes, invalid };
+}
+
+function describeInvalid(invalid) {
+  return invalid.map(i => `${i.char} (${i.codePoint})${i.count > 1 ? ' ×' + i.count : ''}`).join(', ');
 }
 
 // 어디서도 못 잡은 예외/네트워크 오류로 서버 전체가 죽는 것을 막는 마지막 안전망.
@@ -299,7 +364,7 @@ app.get('/api/history', ah(async (req, res) => {
 
 // 발송 이력 수동 등록 (다른 경로로 이미 보낸 문자를 기록만 남기고 싶을 때)
 app.post('/api/history', ah(async (req, res) => {
-  const { name, phone, templateLabel, memo, proposedDate, success, sentAt } = req.body;
+  const { name, phone, templateLabel, memo, proposedDate, success, sentAt, message } = req.body;
   if (!name || !phone) return res.status(400).json({ error: '이름과 연락처는 필수입니다.' });
 
   await saveHistoryEntry({
@@ -309,6 +374,7 @@ app.post('/api/history', ah(async (req, res) => {
     memo: memo || '',
     proposedDate: proposedDate || '',
     templateLabel: templateLabel || '수기입력',
+    message: message || '',
     success: success !== false,
     manual: true,
   });
@@ -346,6 +412,14 @@ app.delete('/api/history/:id', ah(async (req, res) => {
 }));
 
 // 실제 문자 발송 (문자코리아 API)
+
+// 문자 내용에 보낼 수 없는 글자가 있는지 미리 검사 (미리보기 화면의 경고용)
+app.post('/api/check-text', ah(async (req, res) => {
+  const { text } = req.body;
+  const r = sanitizeSms(text);
+  res.json({ fixes: r.fixes, invalid: r.invalid });
+}));
+
 app.post('/api/send', ah(async (req, res) => {
   const { templateId, name, phone, date, memo, message: customMessage } = req.body;
 
@@ -365,6 +439,21 @@ app.post('/api/send', ah(async (req, res) => {
     message = tpl.body.replaceAll('{{name}}', name);
     if (tpl.hasDate) message = message.replaceAll('{{date}}', date || '');
   }
+
+  // 보낼 수 없는 글자 정리: 바꿀 수 있는 건 자동 변환, 바꿀 수 없는 건(이모지 등) 보내기 전에 막고 알려줌
+  const cleaned = sanitizeSms(message);
+  if (cleaned.invalid.length) {
+    return res.status(400).json({
+      success: false,
+      error: `문자에 보낼 수 없는 글자가 있어요: ${describeInvalid(cleaned.invalid)}. 해당 글자를 지우고 다시 보내주세요.`,
+      invalidChars: cleaned.invalid,
+    });
+  }
+  message = cleaned.text;
+  const sendFixes = cleaned.fixes;
+  const safeName = sanitizeSms(name).text.trim();
+  const safeTitle = sanitizeSms(tpl.label).text;
+  const safePhone = String(phone).replace(/\D/g, '');
 
   const { SMSKO_USER_ID, SMSKO_API_KEY, SMSKO_SENDER } = process.env;
   if (!SMSKO_USER_ID || !SMSKO_API_KEY || !SMSKO_SENDER) {
@@ -393,9 +482,9 @@ app.post('/api/send', ah(async (req, res) => {
     const sendRes = await axios.post(`${SMSKO_BASE}/api/v1/message`, {
       userId: SMSKO_USER_ID,
       sender: SMSKO_SENDER.replace(/-/g, ''),
-      receiver: [phone.replace(/-/g, '')],
-      name: [name],
-      title: tpl.label,
+      receiver: [safePhone],
+      name: [safeName],
+      title: safeTitle,
       message,
       messageType,
     }, withProxy({
@@ -413,12 +502,13 @@ app.post('/api/send', ah(async (req, res) => {
         name, phone, memo: memo || '',
         proposedDate: date || '',
         templateLabel: tpl.label,
+        message,
         success: true,
       });
     } catch (historyErr) {
       console.error('발송 성공 후 이력 저장 실패(무시하고 응답 계속):', historyErr.message);
     }
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, fixes: sendFixes });
   } catch (err) {
     const errData = err?.response?.data;
     console.error(errData || err.message);
@@ -428,6 +518,7 @@ app.post('/api/send', ah(async (req, res) => {
         name, phone, memo: memo || '',
         proposedDate: date || '',
         templateLabel: tpl.label,
+        message,
         success: false,
         error: (errData && (errData.message || JSON.stringify(errData))) || '문자코리아 API 호출 중 오류가 발생했습니다.',
       });
@@ -512,7 +603,8 @@ app.post('/api/schedules', ah(async (req, res) => {
     location: location || '',
     round: round || '',
     note: note || '',
-    status: status || '미응답',
+    status: status || '예정',
+    changeLog: [],
     createdAt: new Date().toISOString(),
   };
   list.push(entry);
@@ -521,14 +613,17 @@ app.post('/api/schedules', ah(async (req, res) => {
 }));
 
 // 면접 일정 수정 (일시/팀/면접진행자/면접장소/구분/비고/상태 변경)
+// - 면접 일시가 바뀌면 변경 이력(changeLog)에 자동 기록
+// - 상태를 '취소'로 바꾸면 취소 일시/사유를 기록, 다시 '예정'으로 돌리면 취소 정보 제거
 app.put('/api/schedules/:id', ah(async (req, res) => {
   const list = await loadSchedules();
   const idx = list.findIndex(s => s.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: '일정을 찾을 수 없습니다.' });
 
-  const { name, phone, interviewAt, team, interviewer, location, round, note, status } = req.body;
-  list[idx] = {
-    ...list[idx],
+  const prev = list[idx];
+  const { name, phone, interviewAt, team, interviewer, location, round, note, status, reason } = req.body;
+  const next = {
+    ...prev,
     ...(name !== undefined && { name }),
     ...(phone !== undefined && { phone }),
     ...(interviewAt !== undefined && { interviewAt }),
@@ -537,8 +632,37 @@ app.put('/api/schedules/:id', ah(async (req, res) => {
     ...(location !== undefined && { location }),
     ...(round !== undefined && { round }),
     ...(note !== undefined && { note }),
-    ...(status !== undefined && { status }),
   };
+
+  const changeLog = Array.isArray(prev.changeLog) ? [...prev.changeLog] : [];
+
+  // 일시 변경 기록
+  if (interviewAt !== undefined && interviewAt !== prev.interviewAt) {
+    changeLog.push({
+      at: new Date().toISOString(),
+      from: prev.interviewAt,
+      to: interviewAt,
+      reason: reason || '',
+    });
+  }
+  next.changeLog = changeLog;
+
+  // 취소/복구 처리
+  if (status !== undefined) {
+    const normalized = status === '취소' ? '취소' : '예정';
+    next.status = normalized;
+    if (normalized === '취소' && prev.status !== '취소') {
+      next.cancelledAt = new Date().toISOString();
+      next.cancelReason = reason || '';
+    } else if (normalized === '취소') {
+      if (reason) next.cancelReason = reason;
+    } else {
+      delete next.cancelledAt;
+      delete next.cancelReason;
+    }
+  }
+
+  list[idx] = next;
   await saveSchedules(list);
   res.json(list[idx]);
 }));
@@ -550,6 +674,86 @@ app.delete('/api/schedules/:id', ah(async (req, res) => {
   if (next.length === list.length) return res.status(404).json({ error: '일정을 찾을 수 없습니다.' });
   await saveSchedules(next);
   res.json({ success: true });
+}));
+
+// ---------- 이력서 검토 ----------
+const CRITERIA_PATH = path.join(DATA_DIR, 'criteria.json');
+const DEFAULT_CRITERIA = { idealProfile: '', requirements: '' };
+
+async function loadCriteria() {
+  return storeGet('criteria', CRITERIA_PATH, DEFAULT_CRITERIA);
+}
+
+async function saveCriteria(value) {
+  return storeSet('criteria', CRITERIA_PATH, value);
+}
+
+// 인재상/채용요건 조회
+app.get('/api/criteria', ah(async (req, res) => {
+  res.json(await loadCriteria());
+}));
+
+// 인재상/채용요건 저장
+app.put('/api/criteria', ah(async (req, res) => {
+  const { idealProfile, requirements } = req.body;
+  const value = { idealProfile: idealProfile || '', requirements: requirements || '' };
+  await saveCriteria(value);
+  res.json(value);
+}));
+
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
+
+// 이력서 한 건을 인재상/채용요건 기준으로 AI가 평가
+app.post('/api/screen-resume', ah(async (req, res) => {
+  const { resumeText } = req.body;
+  if (!resumeText || !resumeText.trim()) {
+    return res.status(400).json({ error: '이력서 내용을 입력해주세요.' });
+  }
+  if (!anthropic) {
+    return res.status(500).json({ error: '서버에 ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.' });
+  }
+
+  const criteria = await loadCriteria();
+  if (!criteria.idealProfile && !criteria.requirements) {
+    return res.status(400).json({ error: '먼저 인재상/채용요건을 입력하고 저장해주세요.' });
+  }
+
+  const systemPrompt = `당신은 채용 담당자를 돕는 이력서 검토 보조자입니다. 회사의 인재상과 채용요건을 기준으로 이력서를 객관적으로 검토하고, 반드시 아래 JSON 형식으로만 답하세요. 다른 설명 문장 없이 JSON만 출력하세요.
+
+{
+  "score": (1~10 사이 정수, 적합도 점수),
+  "summary": "지원자에 대한 2~3문장 요약",
+  "strengths": ["강점1", "강점2", ...],
+  "concerns": ["우려사항1", "우려사항2", ...],
+  "recommendation": "적극 추천" | "추천" | "보류" | "비추천" 중 하나
+}`;
+
+  const userMessage = `[회사 인재상]\n${criteria.idealProfile || '(입력 없음)'}\n\n[채용요건]\n${criteria.requirements || '(입력 없음)'}\n\n[지원자 이력서]\n${resumeText}`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    const textBlock = response.content.find(b => b.type === 'text');
+    let parsed;
+    try {
+      const cleaned = (textBlock?.text || '').replace(/```json|```/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return res.status(500).json({ error: 'AI 응답을 해석하지 못했습니다.', raw: textBlock?.text });
+    }
+
+    res.json({ success: true, result: parsed });
+  } catch (err) {
+    console.error('[screen-resume] 오류:', err.message);
+    res.status(500).json({ error: 'AI 평가 중 오류가 발생했습니다: ' + err.message });
+  }
 }));
 
 // 로컬(node server.js)이나 Render처럼 직접 실행할 때만 포트를 엽니다.
