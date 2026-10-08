@@ -23,6 +23,7 @@ const manualTemplateLabel = document.getElementById('manualTemplateLabel');
 const manualResult = document.getElementById('manualResult');
 const manualProposedDate = document.getElementById('manualProposedDate');
 const manualMemo = document.getElementById('manualMemo');
+const manualMessage = document.getElementById('manualMessage');
 const manualHistorySubmitBtn = document.getElementById('manualHistorySubmitBtn');
 const manualHistoryStatus = document.getElementById('manualHistoryStatus');
 
@@ -33,6 +34,20 @@ let selectedHistoryIds = new Set();
 const tabBtns = document.querySelectorAll('.tab-btn');
 const sendView = document.getElementById('sendView');
 const manageView = document.getElementById('manageView');
+const resumeView = document.getElementById('resumeView');
+const idealProfileInput = document.getElementById('idealProfileInput');
+const requirementsInput = document.getElementById('requirementsInput');
+const saveCriteriaBtn = document.getElementById('saveCriteriaBtn');
+const criteriaStatus = document.getElementById('criteriaStatus');
+const resumeTextInput = document.getElementById('resumeTextInput');
+const screenResumeBtn = document.getElementById('screenResumeBtn');
+const resumeStatus = document.getElementById('resumeStatus');
+const resumeResult = document.getElementById('resumeResult');
+const resumeScore = document.getElementById('resumeScore');
+const resumeRecommendation = document.getElementById('resumeRecommendation');
+const resumeSummary = document.getElementById('resumeSummary');
+const resumeStrengths = document.getElementById('resumeStrengths');
+const resumeConcerns = document.getElementById('resumeConcerns');
 const scheduleView = document.getElementById('scheduleView');
 const templateManageSelect = document.getElementById('templateManageSelect');
 const templateDetail = document.getElementById('templateDetail');
@@ -59,6 +74,7 @@ const scheduleOverview = document.getElementById('scheduleOverview');
 const scheduleOverviewTitle = document.getElementById('scheduleOverviewTitle');
 const scheduleTeamFilter = document.getElementById('scheduleTeamFilter');
 const scheduleRoundFilter = document.getElementById('scheduleRoundFilter');
+const scheduleStatusFilter = document.getElementById('scheduleStatusFilter');
 const scheduleNameSearch = document.getElementById('scheduleNameSearch');
 const scheduleFilterResetBtn = document.getElementById('scheduleFilterResetBtn');
 const schedulePeriodFilter = document.getElementById('schedulePeriodFilter');
@@ -110,6 +126,49 @@ function validate() {
 }
 
 let previewEdited = false;
+
+// ---------- 보낼 수 없는 글자 미리 검사 ----------
+const textWarn = document.getElementById('textWarn');
+let textCheckTimer = null;
+let textCheckSeq = 0;
+
+function scheduleTextCheck() {
+  clearTimeout(textCheckTimer);
+  textCheckTimer = setTimeout(runTextCheck, 400);
+}
+
+async function runTextCheck() {
+  const text = previewText.value;
+  const seq = ++textCheckSeq;
+  if (!templateSelect.value || !text.trim()) { textWarn.hidden = true; return; }
+  try {
+    const res = await fetch('/api/check-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (seq !== textCheckSeq) return; // 그 사이 내용이 또 바뀌었으면 오래된 결과는 버림
+    const invalid = data.invalid || [];
+    const fixes = data.fixes || [];
+    if (invalid.length) {
+      textWarn.className = 'text-warn text-warn-err';
+      textWarn.textContent = '⚠ 문자로 보낼 수 없는 글자가 있어요: '
+        + invalid.map(i => `${i.char} (${i.codePoint})${i.count > 1 ? ' ×' + i.count : ''}`).join(', ')
+        + ' — 지우고 보내주세요.';
+      textWarn.hidden = false;
+    } else if (fixes.length) {
+      textWarn.className = 'text-warn text-warn-info';
+      textWarn.textContent = 'ℹ 보낼 때 자동으로 바뀌어요: '
+        + fixes.map(f => `${f.desc} (${f.count}개)`).join(', ');
+      textWarn.hidden = false;
+    } else {
+      textWarn.hidden = true;
+    }
+  } catch {
+    // 검사 실패는 조용히 무시 (발송 시 서버가 다시 검사함)
+  }
+}
 const PREVIEW_PLACEHOLDER = '왼쪽에서 이름과 양식을 선택하면 실제 발송될 문자 내용이 여기에 표시됩니다.';
 
 async function updatePreview() {
@@ -118,6 +177,7 @@ async function updatePreview() {
     charCount.textContent = '0자';
     previewEdited = false;
     previewResetBtn.hidden = true;
+    textWarn.hidden = true;
     return;
   }
   if (previewEdited) {
@@ -137,12 +197,14 @@ async function updatePreview() {
   const data = await res.json();
   previewText.value = data.message || '';
   charCount.textContent = `${(data.message || '').length}자`;
+  scheduleTextCheck();
 }
 
 previewText.addEventListener('input', () => {
   previewEdited = true;
   previewResetBtn.hidden = false;
   charCount.textContent = `${previewText.value.length}자`;
+  scheduleTextCheck();
 });
 
 previewResetBtn.addEventListener('click', () => {
@@ -178,8 +240,12 @@ async function handleSend() {
     const data = await res.json();
 
     if (res.ok && data.success) {
-      statusEl.textContent = '문자가 발송되었습니다.';
+      const fixNote = (data.fixes && data.fixes.length)
+        ? ' (자동으로 바꿔서 보냈어요: ' + data.fixes.map(f => `${f.desc} ${f.count}개`).join(', ') + ')'
+        : '';
+      statusEl.textContent = '문자가 발송되었습니다.' + fixNote;
       statusEl.className = 'status ok';
+      textWarn.hidden = true;
       previewEdited = false;
       previewResetBtn.hidden = true;
       loadHistory();
@@ -236,6 +302,37 @@ function updateMonthFilterOptions() {
   historyMonthFilter.value = months.includes(current) ? current : '';
 }
 
+// ---------- 보낸 문자 확인 모달 ----------
+const msgModal = document.getElementById('msgModal');
+const msgModalMeta = document.getElementById('msgModalMeta');
+const msgModalBody = document.getElementById('msgModalBody');
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function openMsgModal(item) {
+  const rows = [
+    ['발송일시', formatDateTime(item.sentAt)],
+    ['받는 사람', `${item.name} (${item.phone})`],
+    ['양식', item.templateLabel],
+    ['결과', item.success ? '성공' : '실패'],
+  ];
+  if (item.proposedDate) rows.push(['면접 제안 일시', item.proposedDate]);
+  if (item.memo) rows.push(['메모', item.memo]);
+  if (!item.success && item.error) rows.push(['실패 사유', item.error]);
+  msgModalMeta.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span>${escapeHtml(v)}</div>`).join('');
+  msgModalBody.textContent = item.message
+    ? item.message
+    : '저장된 문자 내용이 없습니다. (문자 내용 저장 기능이 추가되기 전에 발송한 건이거나, 수기로 추가한 건입니다.)';
+  msgModal.hidden = false;
+}
+
+function closeMsgModal() { msgModal.hidden = true; }
+document.getElementById('msgModalClose').addEventListener('click', closeMsgModal);
+msgModal.addEventListener('click', (e) => { if (e.target === msgModal) closeMsgModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMsgModal(); });
+
 function renderHistory() {
   const keyword = historySearch.value.trim().toLowerCase();
   const monthValue = historyMonthFilter.value;
@@ -263,14 +360,14 @@ function renderHistory() {
   historyBody.innerHTML = filtered.map(item => `
     <tr>
       <td><input type="checkbox" class="history-row-check" data-id="${item.id}" ${selectedHistoryIds.has(item.id) ? 'checked' : ''} /></td>
-      <td>${formatDateTime(item.sentAt)}</td>
-      <td><button class="history-name-btn" data-id="${item.id}">${item.name}</button></td>
-      <td>${item.phone}</td>
-      <td>${item.templateLabel}</td>
-      <td>${item.proposedDate || '-'}</td>
-      <td>${item.memo || '-'}</td>
-      <td class="${item.success ? 'result-ok' : 'result-err'}">${item.success ? '성공' : '실패'}</td>
-      <td>
+      <td data-label="일시">${formatDateTime(item.sentAt)}</td>
+      <td data-label="이름"><button class="history-name-btn" data-id="${item.id}" title="${escapeHtml(item.name)} — 눌러서 일정 등록 폼에 채우기">${item.name}</button></td>
+      <td data-label="연락처">${item.phone}</td>
+      <td data-label="양식"><button class="history-msg-btn" data-id="${item.id}" title="${escapeHtml(item.templateLabel)} — 눌러서 보낸 문자 확인">${item.templateLabel}</button></td>
+      <td data-label="면접 제안 일시" title="${escapeHtml(item.proposedDate || '')}">${item.proposedDate || '-'}</td>
+      <td data-label="메모" title="${escapeHtml(item.memo || '')}">${item.memo || '-'}</td>
+      <td data-label="결과" class="${item.success ? 'result-ok' : 'result-err'}">${item.success ? '성공' : '실패'}</td>
+      <td data-label="참석여부">
         <select class="attendance-select" data-id="${item.id}">
           <option value="미응답" ${item.attendance === '미응답' || !item.attendance ? 'selected' : ''}>미응답</option>
           <option value="참석" ${item.attendance === '참석' ? 'selected' : ''}>참석</option>
@@ -312,6 +409,13 @@ function renderHistory() {
     btn.addEventListener('click', () => {
       const item = historyRaw.find(h => h.id === btn.dataset.id);
       if (item) fillScheduleFormFrom(item);
+    });
+  });
+
+  historyBody.querySelectorAll('.history-msg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = historyRaw.find(h => h.id === btn.dataset.id);
+      if (item) openMsgModal(item);
     });
   });
 
@@ -385,6 +489,7 @@ manualHistorySubmitBtn.addEventListener('click', async () => {
         templateLabel: manualTemplateLabel.value.trim(),
         proposedDate: manualProposedDate.value.trim(),
         memo: manualMemo.value.trim(),
+        message: manualMessage.value.trim(),
         success: manualResult.value === 'true',
       }),
     });
@@ -396,6 +501,7 @@ manualHistorySubmitBtn.addEventListener('click', async () => {
     manualTemplateLabel.value = '';
     manualProposedDate.value = '';
     manualMemo.value = '';
+    manualMessage.value = '';
     manualResult.value = 'true';
     loadHistory();
   } catch {
@@ -421,8 +527,10 @@ sendBtn.addEventListener('click', handleSend);
 function showTab(tab) {
   tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   sendView.hidden = tab !== 'send';
+  resumeView.hidden = tab !== 'resume';
   manageView.hidden = tab !== 'manage';
   if (tab === 'manage') refreshTemplateManageSelect();
+  if (tab === 'resume') loadCriteria();
   if (tab === 'send') loadTemplates(); // 양식 변경사항 반영
 }
 
@@ -672,6 +780,13 @@ function renderScheduleCard(s, container) {
   const locationView = node.querySelector('.sch-location-view');
   const roundView = node.querySelector('.sch-round-view');
   const noteView = node.querySelector('.sch-note-view');
+  const statusView = node.querySelector('.sch-status-view');
+  const cancelRow = node.querySelector('.sch-cancel-row');
+  const cancelView = node.querySelector('.sch-cancel-view');
+  const changeLogBox = node.querySelector('.sch-change-log');
+  const changeListEl = node.querySelector('.sch-change-list');
+  const statusInputEl = node.querySelector('.sch-status-input');
+  const reasonInputEl = node.querySelector('.sch-reason-input');
   const phoneInputEl = node.querySelector('.sch-phone-input');
   const yearInputEl = node.querySelector('.sch-year-input');
   const monthInputEl = node.querySelector('.sch-month-input');
@@ -718,6 +833,17 @@ function renderScheduleCard(s, container) {
     locationView.textContent = s.location || '-';
     roundView.textContent = s.round || '-';
     noteView.textContent = s.note || '-';
+    const cancelled = s.status === '취소';
+    const changes = Array.isArray(s.changeLog) ? s.changeLog : [];
+    statusView.textContent = cancelled ? '취소됨' : (changes.length ? `예정 (일정 ${changes.length}회 변경됨)` : '예정');
+    cancelRow.hidden = !cancelled;
+    cancelView.textContent = cancelled
+      ? `${s.cancelReason || '사유 없음'}${s.cancelledAt ? ' (' + formatDateTime(s.cancelledAt) + ' 취소)' : ''}`
+      : '';
+    changeLogBox.hidden = changes.length === 0;
+    changeListEl.innerHTML = changes.map(c =>
+      `<li>${formatSchedule(c.from)} → ${formatSchedule(c.to)}${c.reason ? ' · ' + c.reason : ''} <span class="sch-change-at">(${formatDateTime(c.at)} 변경)</span></li>`
+    ).join('');
     viewBlock.hidden = false;
     editBlock.hidden = true;
     editBtn.hidden = false;
@@ -734,6 +860,8 @@ function renderScheduleCard(s, container) {
     locationInputEl.value = s.location || '';
     roundInputEl.value = s.round || '';
     noteInputEl.value = s.note || '';
+    statusInputEl.value = s.status === '취소' ? '취소' : '예정';
+    reasonInputEl.value = '';
     viewBlock.hidden = true;
     editBlock.hidden = false;
     editBtn.hidden = true;
@@ -769,6 +897,8 @@ function renderScheduleCard(s, container) {
           location: locationInputEl.value.trim(),
           round: roundInputEl.value,
           note: noteInputEl.value.trim(),
+          status: statusInputEl.value,
+          reason: reasonInputEl.value.trim(),
         }),
       });
       if (!res.ok) throw new Error('저장 실패');
@@ -942,7 +1072,7 @@ function renderScheduleOverview() {
 
   const todayKey = todayKeyStr();
   const todays = schedules
-    .filter(s => dateKey(s.interviewAt) === todayKey)
+    .filter(s => dateKey(s.interviewAt) === todayKey && s.status !== '취소')
     .sort((a, b) => a.interviewAt.localeCompare(b.interviewAt));
 
   if (!todays.length) {
@@ -964,11 +1094,11 @@ function renderScheduleOverview() {
       <tbody>
         ${todays.map(s => `
           <tr class="overview-row" data-id="${s.id}">
-            <td>${formatFullKorean(s.interviewAt)}</td>
-            <td>${s.name}</td>
-            <td>${s.location || '-'}</td>
-            <td>${s.team || '-'}</td>
-            <td>${s.interviewer || '-'}</td>
+            <td data-label="일시">${formatFullKorean(s.interviewAt)}</td>
+            <td data-label="이름">${s.name}</td>
+            <td data-label="장소">${s.location || '-'}</td>
+            <td data-label="팀">${s.team || '-'}</td>
+            <td data-label="면접자">${s.interviewer || '-'}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -999,6 +1129,7 @@ function getRollingRange(now, days) {
 function renderScheduleList() {
   const team = scheduleTeamFilter.value;
   const round = scheduleRoundFilter.value;
+  const statusFilter = scheduleStatusFilter.value;
   const period = schedulePeriodFilter.value;
   const keyword = scheduleNameSearch.value.trim().toLowerCase();
   const now = new Date();
@@ -1014,6 +1145,11 @@ function renderScheduleList() {
     if (!matchesTeam) return false;
     const matchesRound = !round || s.round === round;
     if (!matchesRound) return false;
+    const isCancelled = s.status === '취소';
+    const isChanged = Array.isArray(s.changeLog) && s.changeLog.length > 0;
+    if (statusFilter === 'active' && isCancelled) return false;
+    if (statusFilter === 'changed' && !isChanged) return false;
+    if (statusFilter === 'cancelled' && !isCancelled) return false;
     const matchesKeyword = !keyword || s.name.toLowerCase().includes(keyword);
     if (!matchesKeyword) return false;
     if (!range) return true;
@@ -1034,16 +1170,22 @@ function renderScheduleList() {
     return;
   }
 
-  scheduleListBody.innerHTML = filtered.map(s => `
-    <tr>
-      <td>${formatSchedule(s.interviewAt)}</td>
-      <td>${s.name}</td>
-      <td>${s.phone || '-'}</td>
-      <td>${s.round || '-'}</td>
-      <td>${s.team || '-'}</td>
+  scheduleListBody.innerHTML = filtered.map(s => {
+    const cancelled = s.status === '취소';
+    const changed = Array.isArray(s.changeLog) && s.changeLog.length > 0;
+    const badge = cancelled
+      ? '<span class="badge badge-cancel">취소</span>'
+      : (changed ? '<span class="badge badge-change">변경</span>' : '');
+    return `
+    <tr class="${cancelled ? 'row-cancelled' : ''}">
+      <td data-label="일시">${formatSchedule(s.interviewAt)}</td>
+      <td data-label="이름">${s.name}${badge}</td>
+      <td data-label="연락처">${s.phone || '-'}</td>
+      <td data-label="구분">${s.round || '-'}</td>
+      <td data-label="팀">${s.team || '-'}</td>
       <td><button class="schedule-view-btn" data-id="${s.id}">상세</button></td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 
   scheduleListBody.querySelectorAll('.schedule-view-btn').forEach(btn => {
     btn.addEventListener('click', () => selectSchedule(btn.dataset.id));
@@ -1059,12 +1201,14 @@ function selectSchedule(id) {
 
 scheduleTeamFilter.addEventListener('change', renderScheduleList);
 scheduleRoundFilter.addEventListener('change', renderScheduleList);
+scheduleStatusFilter.addEventListener('change', renderScheduleList);
 schedulePeriodFilter.addEventListener('change', renderScheduleList);
 scheduleNameSearch.addEventListener('input', renderScheduleList);
 
 scheduleFilterResetBtn.addEventListener('click', () => {
   scheduleTeamFilter.value = '';
   scheduleRoundFilter.value = '';
+  scheduleStatusFilter.value = '';
   schedulePeriodFilter.value = 'all';
   scheduleNameSearch.value = '';
   renderScheduleList();
@@ -1129,3 +1273,73 @@ loadInterviewers();
 loadLocations();
 loadRounds();
 loadSchedules();
+
+// ---------- 이력서 검토 ----------
+async function loadCriteria() {
+  try {
+    const res = await fetch('/api/criteria');
+    const data = await res.json();
+    idealProfileInput.value = data.idealProfile || '';
+    requirementsInput.value = data.requirements || '';
+  } catch {
+    // 조용히 무시
+  }
+}
+
+saveCriteriaBtn.addEventListener('click', async () => {
+  saveCriteriaBtn.disabled = true;
+  try {
+    const res = await fetch('/api/criteria', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        idealProfile: idealProfileInput.value.trim(),
+        requirements: requirementsInput.value.trim(),
+      }),
+    });
+    if (!res.ok) throw new Error();
+    criteriaStatus.textContent = '저장되었습니다.';
+    criteriaStatus.className = 'status ok';
+  } catch {
+    criteriaStatus.textContent = '저장 중 오류가 발생했습니다.';
+    criteriaStatus.className = 'status err';
+  } finally {
+    saveCriteriaBtn.disabled = false;
+  }
+});
+
+screenResumeBtn.addEventListener('click', async () => {
+  const resumeText = resumeTextInput.value.trim();
+  if (!resumeText) {
+    resumeStatus.textContent = '이력서 내용을 입력해주세요.';
+    resumeStatus.className = 'status err';
+    return;
+  }
+  screenResumeBtn.disabled = true;
+  screenResumeBtn.textContent = '평가 중...';
+  resumeStatus.textContent = '';
+  resumeResult.hidden = true;
+  try {
+    const res = await fetch('/api/screen-resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resumeText }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || '평가 실패');
+
+    const r = data.result;
+    resumeScore.textContent = r.score;
+    resumeRecommendation.textContent = r.recommendation;
+    resumeSummary.textContent = r.summary;
+    resumeStrengths.innerHTML = (r.strengths || []).map(s => `<li>${s}</li>`).join('');
+    resumeConcerns.innerHTML = (r.concerns || []).map(s => `<li>${s}</li>`).join('');
+    resumeResult.hidden = false;
+  } catch (err) {
+    resumeStatus.textContent = err.message || '평가 중 오류가 발생했습니다.';
+    resumeStatus.className = 'status err';
+  } finally {
+    screenResumeBtn.disabled = false;
+    screenResumeBtn.textContent = '평가하기';
+  }
+});

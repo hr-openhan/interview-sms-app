@@ -15,6 +15,7 @@
       </div>
       <nav class="tabs">
         <button class="tab-btn active" data-tab="send">문자 보내기</button>
+        <button class="tab-btn" data-tab="resume">이력서 검토</button>
         <button class="tab-btn" data-tab="manage">양식 관리</button>
       </nav>
     </header>
@@ -60,6 +61,7 @@
           <span class="preview-count" id="charCount">0자</span>
         </div>
         <textarea id="previewText" class="preview-text" rows="12">왼쪽에서 이름과 양식을 선택하면 실제 발송될 문자 내용이 여기에 표시됩니다.</textarea>
+        <p id="textWarn" class="text-warn" hidden></p>
         <button id="previewResetBtn" class="link-btn" hidden>자동 생성 내용으로 되돌리기</button>
       </section>
     </main>
@@ -111,6 +113,10 @@
           <input id="manualProposedDate" type="text" placeholder="예: 9월 15일 오후 2시" autocomplete="off" />
         </div>
         <div class="field">
+          <label for="manualMessage">문자 내용 (선택)</label>
+          <textarea id="manualMessage" rows="3" placeholder="보낸 문자 내용을 남겨두고 싶다면 입력하세요"></textarea>
+        </div>
+        <div class="field">
           <label for="manualMemo">메모 (선택)</label>
           <input id="manualMemo" type="text" autocomplete="off" />
         </div>
@@ -118,7 +124,7 @@
         <p class="status" id="manualHistoryStatus"></p>
       </div>
 
-      <table class="history-table">
+      <table class="history-table history-main-table">
         <thead>
           <tr>
             <th><input type="checkbox" id="historySelectAll" /></th>
@@ -209,6 +215,12 @@
           <select id="scheduleRoundFilter">
             <option value="">전체구분</option>
           </select>
+          <select id="scheduleStatusFilter">
+            <option value="">전체상태</option>
+            <option value="active">진행 예정</option>
+            <option value="changed">변경된 일정</option>
+            <option value="cancelled">취소된 일정</option>
+          </select>
           <select id="schedulePeriodFilter">
             <option value="all">전체날짜</option>
             <option value="day">1일</option>
@@ -220,7 +232,7 @@
           <button id="scheduleFilterResetBtn" class="filter-reset-btn">선택 초기화</button>
         </div>
 
-        <table class="history-table">
+        <table class="history-table schedule-list-table">
           <thead>
             <tr>
               <th>일시</th>
@@ -248,6 +260,53 @@
     </div>
     </div>
 
+    <div id="resumeView" class="resume-view" hidden>
+      <section class="panel">
+        <div class="preview-head">
+          <span class="preview-label">인재상 / 채용요건 설정</span>
+        </div>
+        <p class="manage-hint">여기에 저장한 내용을 기준으로 아래 이력서 평가가 이루어집니다.</p>
+        <div class="field">
+          <label for="idealProfileInput">인재상</label>
+          <textarea id="idealProfileInput" rows="4"></textarea>
+        </div>
+        <div class="field">
+          <label for="requirementsInput">채용요건</label>
+          <textarea id="requirementsInput" rows="4"></textarea>
+        </div>
+        <button id="saveCriteriaBtn" class="add-btn">기준 저장</button>
+        <p class="status" id="criteriaStatus"></p>
+      </section>
+
+      <section class="panel" style="margin-top: 24px;">
+        <div class="preview-head">
+          <span class="preview-label">이력서 평가</span>
+        </div>
+        <div class="field">
+          <label for="resumeTextInput">이력서 내용 붙여넣기</label>
+          <textarea id="resumeTextInput" rows="14" placeholder="이력서 원문을 여기에 복사해서 붙여넣으세요."></textarea>
+        </div>
+        <button id="screenResumeBtn" class="send-btn">평가하기</button>
+        <p class="status" id="resumeStatus"></p>
+
+        <div id="resumeResult" class="resume-result" hidden>
+          <div class="resume-result-score">
+            <span id="resumeScore"></span><span class="resume-score-max">/10</span>
+          </div>
+          <p><strong>추천 여부:</strong> <span id="resumeRecommendation"></span></p>
+          <p><strong>요약:</strong> <span id="resumeSummary"></span></p>
+          <div>
+            <strong>강점</strong>
+            <ul id="resumeStrengths"></ul>
+          </div>
+          <div>
+            <strong>우려사항</strong>
+            <ul id="resumeConcerns"></ul>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <div id="manageView" class="manage-view" hidden>
       <div class="manage-toolbar">
         <button id="addTemplateBtn" class="add-btn">+ 새 양식 추가</button>
@@ -259,6 +318,17 @@
         </select>
       </div>
       <div id="templateDetail"></div>
+    </div>
+  </div>
+
+  <div id="msgModal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>보낸 문자 확인</h3>
+        <button id="msgModalClose" class="modal-close" aria-label="닫기">×</button>
+      </div>
+      <div class="modal-meta" id="msgModalMeta"></div>
+      <pre class="modal-body" id="msgModalBody"></pre>
     </div>
   </div>
 
@@ -301,6 +371,12 @@
         <div class="sch-detail-row"><span class="sch-detail-label">면접진행자</span><span class="sch-interviewer-view"></span></div>
         <div class="sch-detail-row"><span class="sch-detail-label">구분</span><span class="sch-round-view"></span></div>
         <div class="sch-detail-row"><span class="sch-detail-label">비고</span><span class="sch-note-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">상태</span><span class="sch-status-view"></span></div>
+        <div class="sch-detail-row sch-cancel-row" hidden><span class="sch-detail-label">취소 사유</span><span class="sch-cancel-view"></span></div>
+        <div class="sch-change-log" hidden>
+          <div class="sch-detail-label">일정 변경 이력</div>
+          <ul class="sch-change-list"></ul>
+        </div>
       </div>
 
       <div class="sch-detail-edit" hidden>
@@ -339,6 +415,17 @@
         <div class="field">
           <label>비고</label>
           <input class="sch-note-input" type="text" />
+        </div>
+        <div class="field">
+          <label>상태</label>
+          <select class="sch-status-input">
+            <option value="예정">예정</option>
+            <option value="취소">취소</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>변경/취소 사유 (선택)</label>
+          <input class="sch-reason-input" type="text" placeholder="일시를 바꾸거나 취소할 때 사유를 남기면 기록됩니다" />
         </div>
       </div>
       <p class="tpl-status sch-status-msg"></p>
