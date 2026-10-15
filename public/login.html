@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>로그인 · 면접 문자 발송</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap login-wrap">
+    <section class="panel login-panel">
+      <div class="mark">01</div>
+      <h1 class="login-title">면접 문자 발송</h1>
+
+      <div id="googleBox" hidden>
+        <p class="manage-hint">허용된 구글 계정으로만 들어올 수 있어요.</p>
+        <a id="googleBtn" class="google-btn" href="/api/auth/google">Google 계정으로 로그인</a>
+      </div>
+
+      <div id="passwordBox" hidden>
+        <p class="manage-hint">비밀번호를 입력해주세요.</p>
+        <div class="field">
+          <label for="pw">비밀번호</label>
+          <input id="pw" type="password" autocomplete="current-password" />
+        </div>
+        <button id="loginBtn" class="send-btn">로그인</button>
+      </div>
+
+      <p class="status" id="loginStatus"></p>
+    </section>
+  </div>
+<script>
+  const st = document.getElementById('loginStatus');
+  const pw = document.getElementById('pw');
+  const btn = document.getElementById('loginBtn');
+
+  const ERRORS = {
+    denied: '이 구글 계정은 아직 권한이 없어요. 소유주에게 이메일 등록을 요청해주세요.',
+    cancelled: '로그인을 취소했어요.',
+    state: '로그인 시간이 지났거나 올바른 접근이 아니에요. 다시 시도해주세요.',
+    failed: '구글 로그인 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.',
+  };
+  const err = new URLSearchParams(location.search).get('error');
+  if (err) { st.textContent = ERRORS[err] || ERRORS.failed; st.className = 'status err'; }
+
+  fetch('/api/auth-status').then(r => r.json()).then(s => {
+    if (!s.enabled || s.authed) { location.replace('/'); return; }
+    document.getElementById('googleBox').hidden = s.mode !== 'google';
+    document.getElementById('passwordBox').hidden = s.mode !== 'password';
+    if (s.mode === 'password') pw.focus();
+  }).catch(() => {
+    st.textContent = '서버에 연결하지 못했어요. 잠시 후 다시 시도해주세요.'; st.className = 'status err';
+  });
+
+  async function login() {
+    if (!pw.value) { st.textContent = '비밀번호를 입력해주세요.'; st.className = 'status err'; return; }
+    btn.disabled = true; st.textContent = '';
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw.value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '로그인 실패');
+      location.replace('/');
+    } catch (e) {
+      st.textContent = e.message || '로그인 중 오류가 발생했습니다.';
+      st.className = 'status err';
+      pw.select();
+    } finally { btn.disabled = false; }
+  }
+  btn.addEventListener('click', login);
+  pw.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>
