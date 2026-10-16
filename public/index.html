@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>채용</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="mark">01</div>
+      <div class="title-block">
+        <h1>채용</h1>
+      </div>
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="resume" data-menus="resume">이력서 검토</button>
+        <button class="tab-btn" data-tab="send" data-menus="send history schedule">문자 보내기</button>
+        <button class="tab-btn" data-tab="manage" data-menus="templates">양식 관리</button>
+      </nav>
+    </header>
+    <p id="authBanner" class="auth-banner" hidden>⚠ 로그인 보호가 꺼져 있어요. 주소를 아는 누구나 문자 발송·이력을 쓸 수 있어요. Google 로그인(또는 APP_PASSWORD)을 설정해주세요. 이 상태에서는 지원자 정보가 들어 있는 <b>노션 연동을 사용할 수 없어요.</b></p>
+
+    <section id="noAccess" class="panel no-access" hidden>
+      <h2>접근할 수 있는 메뉴가 없어요</h2>
+      <p class="manage-hint">아직 권한이 없는 계정이에요. 소유주에게 메뉴 권한을 요청해주세요.</p>
+    </section>
+
+    <div id="sendView" hidden>
+    <main class="grid" data-menu="send">
+      <section class="panel form-panel">
+        <p id="sendReadonlyNote" class="perm-note" hidden>보기 권한만 있어서 문자를 보낼 수 없어요.</p>
+        <div class="notion-pick-row" data-edit="send">
+          <button id="openNotionPickerBtn" class="link-btn" type="button">📋 노션에서 지원자 불러오기</button>
+        </div>
+        <div class="field">
+          <label for="name">지원자 이름</label>
+          <input id="name" type="text" placeholder="예: 오픈한" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label for="phone">연락처</label>
+          <input id="phone" type="tel" placeholder="예: 010-1234-5678" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label for="template">문자 양식</label>
+          <select id="template">
+            <option value="">양식을 선택하세요</option>
+          </select>
+        </div>
+
+        <div class="field" id="dateField" hidden>
+          <label for="date">면접 일정 / 세부 내용</label>
+          <textarea id="date" rows="3" placeholder="예: 9월 12일 (금) 오후 2시"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="memo">메모</label>
+          <input id="memo" type="text" autocomplete="off" />
+          <p class="hint">문자 발송에 포함되지 않는 내용입니다.</p>
+        </div>
+
+        <label id="notionWriteBackRow" class="check-row" hidden>
+          <input type="checkbox" id="notionWriteBack" checked />
+          <span id="notionWriteBackLabel"></span>
+        </label>
+        <button id="sendBtn" class="send-btn" data-edit="send" disabled>문자 보내기</button>
+        <p class="status" id="status"></p>
+      </section>
+
+      <section class="panel preview-panel">
+        <div class="preview-head">
+          <span class="preview-label">미리보기 (직접 수정 가능)</span>
+          <span class="preview-count" id="charCount">0자</span>
+        </div>
+        <textarea id="previewText" class="preview-text" rows="12">왼쪽에서 이름과 양식을 선택하면 실제 발송될 문자 내용이 여기에 표시됩니다.</textarea>
+        <p id="textWarn" class="text-warn" hidden></p>
+        <button id="previewResetBtn" class="link-btn" hidden>자동 생성 내용으로 되돌리기</button>
+      </section>
+    </main>
+
+    <section class="panel history-panel" data-menu="history">
+      <div class="preview-head">
+        <span class="preview-label">발송 이력</span>
+        <div class="sort-toggle">
+          <button class="sort-btn active" data-sort="date">날짜순</button>
+          <button class="sort-btn" data-sort="name">가나다순</button>
+        </div>
+      </div>
+
+      <div class="history-filters">
+        <input id="historySearch" type="text" placeholder="이름 또는 연락처로 검색" autocomplete="off" />
+        <select id="historyMonthFilter">
+          <option value="">전체 월</option>
+        </select>
+        <button id="addManualHistoryBtn" class="add-btn" data-edit="history">+ 수기로 추가</button>
+        <button id="deleteSelectedBtn" class="delete-failed-btn" data-edit="history" disabled>삭제 (0)</button>
+      </div>
+
+      <div id="manualHistoryForm" class="manual-history-form" data-edit="history" hidden>
+        <div class="field-row">
+          <div class="field">
+            <label for="manualName">이름</label>
+            <input id="manualName" type="text" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="manualPhone">연락처</label>
+            <input id="manualPhone" type="tel" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="manualTemplateLabel">양식명 (선택)</label>
+            <input id="manualTemplateLabel" type="text" placeholder="예: 전화면접" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="manualResult">결과</label>
+            <select id="manualResult">
+              <option value="true">성공</option>
+              <option value="false">실패</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="manualProposedDate">면접 제안 일시 (선택)</label>
+          <input id="manualProposedDate" type="text" placeholder="예: 9월 15일 오후 2시" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="manualMessage">문자 내용 (선택)</label>
+          <textarea id="manualMessage" rows="3" placeholder="보낸 문자 내용을 남겨두고 싶다면 입력하세요"></textarea>
+        </div>
+        <div class="field">
+          <label for="manualMemo">메모 (선택)</label>
+          <input id="manualMemo" type="text" autocomplete="off" />
+        </div>
+        <button id="manualHistorySubmitBtn" class="send-btn">이력 추가</button>
+        <p class="status" id="manualHistoryStatus"></p>
+      </div>
+
+      <table class="history-table history-main-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="historySelectAll" data-edit="history" /></th>
+            <th>일시</th>
+            <th>이름</th>
+            <th>연락처</th>
+            <th>양식</th>
+            <th>면접 제안 일시</th>
+            <th>메모</th>
+            <th>결과</th>
+            <th>참석여부</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+          <tr><td colspan="10" class="empty-row">발송 이력이 아직 없습니다.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div id="scheduleView" class="schedule-view">
+      <section class="panel schedule-form-panel" data-menu="schedule" data-edit="schedule">
+        <div class="field-row">
+          <div class="field">
+            <label for="schName">지원자 이름</label>
+            <input id="schName" type="text" placeholder="예: 오픈한" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="schPhone">연락처</label>
+            <input id="schPhone" type="tel" placeholder="예: 010-1234-5678" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label>확정 면접 일시</label>
+          <div class="datetime-group">
+            <select id="schYear"></select>
+            <select id="schMonth"></select>
+            <select id="schDay"></select>
+            <input id="schHour" type="number" min="0" max="23" inputmode="numeric" />
+            <span class="datetime-unit">시</span>
+            <input id="schMinute" type="number" min="0" max="59" inputmode="numeric" />
+            <span class="datetime-unit">분</span>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="schLocation">면접장소</label>
+            <select id="schLocation">
+              <option value="">면접장소를 선택하세요</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="schTeam">팀</label>
+            <select id="schTeam">
+              <option value="">팀을 선택하세요</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="schInterviewer">면접진행자</label>
+            <select id="schInterviewer">
+              <option value="">면접진행자를 선택하세요</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="schRound">구분</label>
+            <select id="schRound">
+              <option value="">구분을 선택하세요</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="schNote">비고 (선택)</label>
+          <input id="schNote" type="text" autocomplete="off" />
+        </div>
+        <button id="addScheduleBtn" class="send-btn">일정 등록</button>
+        <p class="status" id="scheduleStatus"></p>
+      </section>
+
+      <section class="panel schedule-list-panel" data-menu="schedule">
+        <div class="preview-head">
+          <span class="preview-label">면접 일정 목록</span>
+        </div>
+
+        <div class="schedule-filters">
+          <select id="scheduleTeamFilter">
+            <option value="">전체 팀</option>
+          </select>
+          <select id="scheduleRoundFilter">
+            <option value="">전체구분</option>
+          </select>
+          <select id="scheduleStatusFilter">
+            <option value="">전체상태</option>
+            <option value="active">진행 예정</option>
+            <option value="changed">변경된 일정</option>
+            <option value="cancelled">취소된 일정</option>
+          </select>
+          <select id="schedulePeriodFilter">
+            <option value="all">전체날짜</option>
+            <option value="day">1일</option>
+            <option value="week">1주일</option>
+            <option value="month">1개월</option>
+            <option value="3month">3개월</option>
+          </select>
+          <input id="scheduleNameSearch" type="text" placeholder="이름으로 검색" autocomplete="off" />
+          <button id="scheduleFilterResetBtn" class="filter-reset-btn">선택 초기화</button>
+        </div>
+
+        <table class="history-table schedule-list-table">
+          <thead>
+            <tr>
+              <th>일시</th>
+              <th>이름</th>
+              <th>연락처</th>
+              <th>구분</th>
+              <th>팀</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="scheduleListBody">
+            <tr><td colspan="6" class="empty-row">등록된 일정이 없습니다.</td></tr>
+          </tbody>
+        </table>
+
+        <div id="scheduleDetail"></div>
+      </section>
+
+      <section class="panel schedule-overview-panel" data-menu="schedule">
+        <div class="preview-head">
+          <span class="preview-label" id="scheduleOverviewTitle">오늘의 면접</span>
+        </div>
+        <div id="scheduleOverview" class="schedule-overview"></div>
+      </section>
+    </div>
+    </div>
+
+    <div id="resumeView" class="resume-view">
+      <section class="panel" data-menu="resume">
+        <div class="preview-head">
+          <span class="preview-label">회사 정보 (사명 · 비전 / 공통 인재상)</span>
+        </div>
+        <p class="manage-hint">공고문 초안과 AI 평가에 쓰여요. 고치려면 <b>수정</b>을 누르고, 끝나면 <b>저장</b>을 눌러주세요.</p>
+        <div class="field">
+          <label for="companyIntroInput">회사 소개 (사명 · 비전)</label>
+          <textarea id="companyIntroInput" rows="6" readonly></textarea>
+        </div>
+        <div class="field">
+          <label for="idealProfileInput">공통 인재상</label>
+          <textarea id="idealProfileInput" rows="8" readonly></textarea>
+        </div>
+        <div class="criteria-actions" data-edit="resume">
+          <button id="editCriteriaBtn" class="add-btn" type="button">✏️ 수정</button>
+          <button id="saveCriteriaBtn" class="add-btn" type="button" hidden>저장</button>
+          <button id="cancelCriteriaBtn" class="link-btn" type="button" hidden>취소</button>
+          <button id="resetCriteriaBtn" class="link-btn" type="button" hidden>문서 기본값으로 되돌리기</button>
+        </div>
+        <p class="status" id="criteriaStatus"></p>
+
+        <details class="rubric-box">
+          <summary>평가표 보기 (총 100점)</summary>
+          <table class="history-table stack-table rubric-table">
+            <thead>
+              <tr><th>평가 영역</th><th>세부 항목</th><th>배점</th><th>평가 기준</th></tr>
+            </thead>
+            <tbody id="rubricBody"></tbody>
+          </table>
+        </details>
+      </section>
+
+      <section class="panel" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
+        <div class="preview-head">
+          <span class="preview-label">공고 만들기</span>
+        </div>
+        <p class="manage-hint">① 팀 → ② 포지션 → ③ 근무 조건 순서로 입력하고 공고문을 만들어요. <b>확정한 공고</b>가 아래 "이력서 평가"의 기준이 돼요.</p>
+        <div class="field-row">
+          <div class="field">
+            <label for="postTeam">① 팀</label>
+            <select id="postTeam"></select>
+            <input id="postTeamOther" type="text" maxlength="50" placeholder="새 팀 이름을 입력하세요 (예: 네스테어)" autocomplete="off" hidden />
+          </div>
+          <div class="field">
+            <label for="postPosition">② 포지션</label>
+            <input id="postPosition" type="text" list="postPositionList" maxlength="100" placeholder="팀을 먼저 골라주세요" autocomplete="off" disabled />
+            <datalist id="postPositionList"></datalist>
+          </div>
+        </div>
+        <p id="postPositionHint" class="manage-hint">처음에는 직접 입력하세요. 한 번 만든 포지션은 다음부터 이 칸에서 골라 쓸 수 있어요.</p>
+        <button id="loadPrevPostingBtn" class="link-btn" type="button" hidden>이 포지션의 이전 공고 불러오기</button>
+        <div class="field-row">
+          <div class="field">
+            <label for="postWorkplace">③ 근무지</label>
+            <input id="postWorkplace" type="text" maxlength="200" />
+          </div>
+          <div class="field">
+            <label for="postType">고용 형태</label>
+            <select id="postType"></select>
+          </div>
+          <div class="field">
+            <label for="postMonths">수습·근무 기간 (개월)</label>
+            <input id="postMonths" type="number" min="1" max="36" step="1" />
+          </div>
+        </div>
+        <p id="postWorkplaceHint" class="manage-hint" hidden></p>
+        <div class="field-row">
+          <div class="field">
+            <label for="postApplyStart">접수 시작일</label>
+            <input id="postApplyStart" type="date" />
+          </div>
+          <div class="field">
+            <label for="postApplyEnd">접수 마감일 (처음엔 시작일 + 2개월)</label>
+            <input id="postApplyEnd" type="date" />
+          </div>
+        </div>
+        <label class="check-chip"><input id="postPortfolio" type="checkbox" /> 지원 방법에 포트폴리오 첨부 안내 넣기 (디자인·포토 등)</label>
+        <div class="posting-actions">
+          <button id="saveDefaultsBtn" class="link-btn" type="button">이 근무 조건을 기본값으로 저장</button>
+          <button id="saveTeamWorkplaceBtn" class="link-btn" type="button">이 팀 근무지를 기본값으로 저장</button>
+        </div>
+        <p class="manage-hint">정규직이면 <b>수습 기간</b>, 계약직·인턴 등이면 <b>근무 기간</b>으로 공고에 적혀요. 근무지는 층수 없이 적고, 팀마다 다르면 "이 팀 근무지를 기본값으로 저장"으로 팀별로 기억해둘 수 있어요.</p>
+        <details id="noticeBox" class="rubric-box">
+          <summary>공통 안내 보기·수정 (근무 시간 · 전형 절차 · 지원 방법 · 복지)</summary>
+          <p class="manage-hint">AI 초안을 만들 때 공고문 맨 끝에 그대로 붙어요. 공고마다 달라지는 내용은 공고문 칸에서 직접 고치세요.</p>
+          <div class="field"><textarea id="postNotice" rows="16"></textarea></div>
+          <div class="posting-actions">
+            <button id="saveNoticeBtn" class="add-btn" type="button">공통 안내 저장</button>
+            <button id="resetNoticeBtn" class="link-btn" type="button">기본 문구로 되돌리기</button>
+          </div>
+          <p class="status" id="noticeStatus"></p>
+        </details>
+        <details id="refBox" class="rubric-box">
+          <summary>팀 직무 참고 보기·수정 (직무정의서에서 옮긴 내용)</summary>
+          <p class="manage-hint">AI 공고 초안과 이력서 평가가 참고해요. <b>공개해도 되는 내용만</b> 적어주세요. (IPO 일정, 내부통제, 자회사, 인력 계획 같은 대외비는 넣지 마세요) 팀을 먼저 고르면 그 팀의 내용이 나와요.</p>
+          <div class="field"><textarea id="teamRefText" rows="10" disabled></textarea></div>
+          <div class="posting-actions">
+            <button id="saveTeamRefBtn" class="add-btn" type="button">팀 직무 참고 저장</button>
+            <button id="resetTeamRefBtn" class="link-btn" type="button">처음 내용으로 되돌리기</button>
+          </div>
+          <p class="status" id="teamRefStatus"></p>
+        </details>
+        <div class="field">
+          <label for="postNotes">AI에게 전할 추가 요청 (선택)</label>
+          <input id="postNotes" type="text" maxlength="500" placeholder="예: 영어 응대 가능자 우대" />
+        </div>
+        <div class="posting-head">
+          <button id="draftJdBtn" class="add-btn" type="button">✨ 공고문 만들기 (AI 초안 3가지)</button>
+          <span class="manage-hint">팀 직무 참고와 기존 공고를 보고 서로 다른 방향의 초안 3가지를 써요. 경력과 필요 사항도 추천해주고, 추천한 경력 줄에는 [추천] 표시가 붙으니 확인하고 고친 뒤 지워주세요.</span>
+        </div>
+        <div id="variantBox" class="variant-box" hidden>
+          <span class="manage-hint" style="margin:0">초안을 골라보세요 (누르면 아래 공고문 칸에 들어가요):</span>
+          <div id="variantBtns" class="variant-btns"></div>
+        </div>
+        <div class="field">
+          <label for="postJd">공고문 (초안을 읽고 필요하면 고쳐주세요)</label>
+          <textarea id="postJd" rows="22"></textarea>
+        </div>
+        <p id="postEditing" class="manage-hint" hidden></p>
+        <div class="posting-actions">
+          <button id="confirmPostingBtn" class="add-btn" type="button">✅ 공고 확정</button>
+          <button id="saveDraftBtn" class="add-btn" type="button">임시 저장</button>
+          <button id="copyPostingBtn" class="add-btn" type="button">복사하기</button>
+          <button id="newPostingBtn" class="link-btn" type="button">새로 작성</button>
+        </div>
+        <span id="postTodo" class="manage-hint"></span>
+        <p class="status" id="postStatus"></p>
+      </section>
+
+      <section class="panel" style="margin-top: 24px;" data-menu="resume">
+        <div class="preview-head">
+          <span class="preview-label">공고 조회</span>
+        </div>
+        <p class="manage-hint">만든 공고를 생성일 기준으로 조회해요. 기본은 최신순이고, 팀별로 거를 수 있어요.</p>
+        <div class="post-filters">
+          <select id="listTeam"></select>
+          <select id="listStatus">
+            <option value="">전체 상태</option>
+            <option value="confirmed">확정</option>
+            <option value="draft">작성 중</option>
+          </select>
+          <select id="listSort">
+            <option value="newest">생성일 최신순</option>
+            <option value="oldest">생성일 오래된순</option>
+          </select>
+        </div>
+        <p id="postingCount" class="manage-hint"></p>
+        <table class="history-table stack-table posting-table">
+          <thead>
+            <tr><th>생성일</th><th>팀</th><th>포지션</th><th>근무 조건</th><th>상태</th><th></th></tr>
+          </thead>
+          <tbody id="postingBody"></tbody>
+        </table>
+        <div id="postingDetail" class="posting-detail" hidden>
+          <div class="posting-detail-head">
+            <strong id="postingDetailTitle"></strong>
+            <button id="closePostingDetailBtn" class="link-btn" type="button">닫기</button>
+          </div>
+          <pre id="postingDetailJd"></pre>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
+        <div class="preview-head">
+          <span class="preview-label">이력서 평가</span>
+        </div>
+        <div class="field">
+          <label for="evalPositionSelect">평가할 공고 (확정된 공고만 보여요)</label>
+          <select id="evalPositionSelect"></select>
+        </div>
+        <div class="input-mode">
+          <label class="check-chip"><input type="radio" name="resumeMode" value="pdf" checked /> PDF 올리기</label>
+          <label class="check-chip"><input type="radio" name="resumeMode" value="text" /> 글 붙여넣기</label>
+          <label class="check-chip"><input type="radio" name="resumeMode" value="notion" /> 노션에서 불러오기</label>
+        </div>
+
+        <div id="notionPickBox" class="field" hidden>
+          <p class="manage-hint" style="margin-top:0">노션에 PDF로 올려 둔 지원자 이력서를 가져와서 지금 평가표로 채점해요. 채용된 사람·탈락한 사람을 몇 명 채점해서 기록하면, 아래 "점수 기준"이 쌓여요.</p>
+          <button id="openNotionReviewPickerBtn" class="add-btn" type="button">📋 노션 지원자 고르기</button>
+          <div id="notionReviewChosen" class="pdf-info" hidden>
+            <span id="notionReviewName" class="pdf-info-name"></span>
+            <span id="notionReviewMeta" class="manage-hint" style="margin:0"></span>
+            <button id="notionReviewClearBtn" class="link-btn" type="button">선택 취소</button>
+          </div>
+          <div id="notionFileChoice" class="file-choice" hidden></div>
+        </div>
+
+        <div id="pdfBox" class="field">
+          <label id="pdfDrop" class="pdf-drop" for="resumeFile">
+            <input id="resumeFile" type="file" accept="application/pdf,.pdf" />
+            <span class="pdf-drop-title">이력서 PDF를 여기에 끌어다 놓거나 눌러서 고르세요</span>
+            <span class="manage-hint" style="margin:0">4MB 이하 · 스캔한 PDF도 읽어요 · 이름·연락처를 읽어서 아래 노션 등록 칸에 채워줘요</span>
+          </label>
+          <div id="pdfInfo" class="pdf-info" hidden>
+            <span id="pdfInfoName" class="pdf-info-name"></span>
+            <span id="pdfInfoSize" class="manage-hint" style="margin:0"></span>
+            <button id="pdfClearBtn" class="link-btn" type="button">파일 지우기</button>
+          </div>
+        </div>
+
+        <div id="textBox" class="field" hidden>
+          <label for="resumeTextInput">이력서 · 포트폴리오 내용 붙여넣기</label>
+          <textarea id="resumeTextInput" rows="14" placeholder="이력서 원문을 여기에 복사해서 붙여넣으세요."></textarea>
+        </div>
+        <button id="screenResumeBtn" class="send-btn">평가하기</button>
+        <p class="status" id="resumeStatus"></p>
+
+        <div id="resumeResult" class="resume-result" hidden>
+          <p class="resume-result-position" id="resultPosition"></p>
+          <div class="resume-result-score">
+            <span id="resumeTotal"></span><span class="resume-score-max">/100</span>
+            <span class="resume-ai-total" id="resumeAiTotal"></span>
+          </div>
+          <p class="manage-hint">점수는 AI가 매긴 1차 평가예요. 사람이 확인해서 점수 칸을 직접 고치면 총점이 바로 다시 계산돼요.</p>
+          <table class="history-table stack-table score-table">
+            <thead>
+              <tr><th>평가 영역</th><th>배점</th><th>점수 (수정 가능)</th><th>AI 평가 근거</th></tr>
+            </thead>
+            <tbody id="scoreBody"></tbody>
+          </table>
+          <p><strong>서류 총평:</strong> <span id="resumeSummary"></span></p>
+          <p><strong>추천 의견 (참고):</strong> <span id="resumeRecommendation"></span></p>
+          <div>
+            <strong>강점</strong>
+            <ul id="resumeStrengths"></ul>
+          </div>
+          <div>
+            <strong>우려사항</strong>
+            <ul id="resumeConcerns"></ul>
+          </div>
+          <div id="missingDocsBox" hidden>
+            <strong>이력서에서 확인되지 않은 제출 서류</strong>
+            <ul id="resumeMissingDocs"></ul>
+          </div>
+          <div id="valuesBox" hidden>
+            <strong>인재상과 연결되는 근거</strong>
+            <ul id="resumeValues"></ul>
+          </div>
+
+          <div id="benchmarkBox" class="benchmark-box" hidden></div>
+
+          <div id="notionRecordBox" class="notion-register" hidden>
+            <strong>노션 카드에 점수 기록</strong>
+            <p id="notionRecordTarget" class="manage-hint"></p>
+            <div class="field-row">
+              <div class="field"><label for="notionRecordRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRecordRec"></select></div>
+            </div>
+            <p class="manage-hint">기록하는 칸: 종합점수 · 평가 요약 · 평가일시 · 추천. 면접상태 같은 다른 칸은 바꾸지 않아요. 위에서 고친 점수가 기록돼요.</p>
+            <button id="notionRecordBtn" class="add-btn" type="button">노션 점수 칸에 기록</button>
+            <p class="status" id="notionRecordStatus"></p>
+          </div>
+
+          <div id="notionRegisterBox" class="notion-register">
+            <strong>노션 "진행중 채용"에 지원자 등록</strong>
+            <p class="manage-hint">사람이 확인하고 합격시킬 지원자만 등록하세요. 위에서 고친 점수가 종합점수로 들어가요.</p>
+            <p id="notionRegisterNotice" class="manage-hint" hidden></p>
+            <div id="notionRegisterForm">
+              <p id="notionExtractNote" class="extract-note" hidden></p>
+              <div class="field-row">
+                <div class="field"><label for="notionName">이름</label><input id="notionName" type="text" autocomplete="off" /></div>
+                <div class="field"><label for="notionPhone">연락처</label><input id="notionPhone" type="tel" autocomplete="off" placeholder="010-1234-5678" /></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="notionTeam">팀명</label><select id="notionTeam"></select></div>
+                <div class="field"><label for="notionStatusSel">면접상태</label><select id="notionStatusSel"></select></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="notionAppliedAt">입사지원일</label><input id="notionAppliedAt" type="date" /></div>
+                <div class="field"><label for="notionRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRec"></select></div>
+              </div>
+              <div class="field">
+                <label>지원채널</label>
+                <div id="notionChannels" class="check-group"></div>
+              </div>
+              <button id="notionRegisterBtn" class="add-btn" type="button">노션에 등록</button>
+              <p class="status" id="notionRegisterStatus"></p>
+              <p class="status" id="notionAttachStatus"></p>
+              <button id="notionRetryAttachBtn" class="link-btn" type="button" hidden>PDF 다시 붙이기</button>
+              <div id="afterRegister" class="after-register" hidden>
+                <span class="manage-hint" style="margin:0">등록한 지원자로 바로 이어서:</span>
+                <button id="fillSendBtn" class="add-btn" type="button" data-edit="send">📨 문자 보내기에 채우기</button>
+                <button id="fillScheduleBtn" class="add-btn" type="button" data-edit="schedule">📅 일정 등록에 채우기</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="manageView" class="manage-view" data-menu="templates" hidden>
+      <div class="manage-toolbar">
+        <button id="addTemplateBtn" class="add-btn" data-edit="templates">+ 새 양식 추가</button>
+      </div>
+      <div class="field">
+        <label for="templateManageSelect">조회할 양식</label>
+        <select id="templateManageSelect">
+          <option value="">양식을 선택하세요</option>
+        </select>
+      </div>
+      <div id="templateDetail"></div>
+    </div>
+  </div>
+
+  <div id="userDock" class="user-dock" hidden>
+    <span id="dockName" class="dock-name"></span>
+    <span id="dockRole" class="dock-role"></span>
+    <button id="openAdminBtn" class="dock-btn" type="button" hidden>⚙ 권한 관리</button>
+    <button id="dockLogoutBtn" class="dock-btn" type="button">로그아웃</button>
+  </div>
+
+  <div id="adminModal" class="modal" hidden>
+    <div class="modal-box admin-modal-box">
+      <div class="modal-head">
+        <h3>권한 관리</h3>
+        <button id="adminModalClose" class="modal-close" aria-label="닫기">×</button>
+      </div>
+      <p class="manage-hint">메뉴마다 <b>없음 / 보기 / 수정</b>을 따로 정해요. 바꾸면 바로 저장되고, 해당 사람에게 곧바로 적용돼요. (소유주는 항상 모든 권한을 가져요)</p>
+      <div class="admin-add">
+        <div class="admin-add-row">
+          <input id="adminNewEmail" type="email" placeholder="구글 이메일 (예: kara@회사.com)" autocomplete="off" />
+          <input id="adminNewName" type="text" placeholder="이름 (예: kara)" autocomplete="off" />
+          <select id="adminNewPreset">
+            <option value="view">처음엔 전체 보기</option>
+            <option value="edit">처음부터 전체 수정</option>
+            <option value="none">처음엔 권한 없음</option>
+          </select>
+          <button id="adminAddBtn" class="add-btn" type="button">추가</button>
+        </div>
+        <p id="adminAddStatus" class="status"></p>
+      </div>
+      <p id="adminMsg" class="manage-hint"></p>
+      <div id="adminUserList" class="admin-list"></div>
+    </div>
+  </div>
+
+  <div id="notionModal" class="modal" hidden>
+    <div class="modal-box notion-modal-box">
+      <div class="modal-head">
+        <h3 id="notionModalTitle">노션 지원자 불러오기</h3>
+        <button id="notionModalClose" class="modal-close" aria-label="닫기">×</button>
+      </div>
+      <div class="notion-filters">
+        <input id="notionSearch" type="text" placeholder="이름으로 검색" autocomplete="off" />
+        <select id="notionStatusFilter"></select>
+        <select id="notionTeamFilter"></select>
+      </div>
+      <p id="notionPickerMsg" class="manage-hint"></p>
+      <div id="notionApplicantList" class="notion-list"></div>
+    </div>
+  </div>
+
+  <div id="msgModal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>보낸 문자 확인</h3>
+        <button id="msgModalClose" class="modal-close" aria-label="닫기">×</button>
+      </div>
+      <div class="modal-meta" id="msgModalMeta"></div>
+      <pre class="modal-body" id="msgModalBody"></pre>
+    </div>
+  </div>
+
+  <template id="templateCardTpl">
+    <div class="tpl-card">
+      <div class="tpl-card-head">
+        <h3 class="tpl-label-view"></h3>
+        <input class="tpl-label-input" type="text" placeholder="양식 이름 (예: 팀장면접_강남)" hidden />
+        <div class="tpl-card-actions">
+          <button class="tpl-edit-btn" data-edit="templates">수정</button>
+          <button class="tpl-save-btn" hidden>저장</button>
+          <button class="tpl-cancel-btn" hidden>취소</button>
+          <button class="tpl-delete-btn" data-edit="templates">삭제</button>
+        </div>
+      </div>
+      <pre class="tpl-body-view"></pre>
+      <textarea class="tpl-body-input" rows="10" placeholder="문자 본문을 입력하세요. 지원자 이름은 {{name}}, 면접일정은 {{date}} 로 표시합니다." hidden></textarea>
+      <p class="tpl-status"></p>
+    </div>
+  </template>
+
+  <template id="scheduleCardTpl">
+    <div class="tpl-card">
+      <div class="tpl-card-head">
+        <h3 class="sch-name-view"></h3>
+        <div class="tpl-card-actions">
+          <button class="sch-calendar-btn">구글캘린더에 추가</button>
+          <button class="sch-edit-btn" data-edit="schedule">수정</button>
+          <button class="sch-save-btn" hidden>저장</button>
+          <button class="sch-cancel-btn" hidden>취소</button>
+          <button class="sch-delete-btn" data-edit="schedule">삭제</button>
+        </div>
+      </div>
+
+      <div class="sch-detail-view">
+        <div class="sch-detail-row"><span class="sch-detail-label">연락처</span><span class="sch-phone-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">면접일시</span><span class="sch-date-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">면접장소</span><span class="sch-location-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">팀</span><span class="sch-team-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">면접진행자</span><span class="sch-interviewer-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">구분</span><span class="sch-round-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">비고</span><span class="sch-note-view"></span></div>
+        <div class="sch-detail-row"><span class="sch-detail-label">상태</span><span class="sch-status-view"></span></div>
+        <div class="sch-detail-row sch-cancel-row" hidden><span class="sch-detail-label">취소 사유</span><span class="sch-cancel-view"></span></div>
+        <div class="sch-change-log" hidden>
+          <div class="sch-detail-label">일정 변경 이력</div>
+          <ul class="sch-change-list"></ul>
+        </div>
+      </div>
+
+      <div class="sch-detail-edit" hidden>
+        <div class="field">
+          <label>연락처</label>
+          <input class="sch-phone-input" type="tel" />
+        </div>
+        <div class="field">
+          <label>면접일시</label>
+          <div class="datetime-group">
+            <select class="sch-year-input"></select>
+            <select class="sch-month-input"></select>
+            <select class="sch-day-input"></select>
+            <input class="sch-hour-input" type="number" min="0" max="23" inputmode="numeric" />
+            <span class="datetime-unit">시</span>
+            <input class="sch-minute-input" type="number" min="0" max="59" inputmode="numeric" />
+            <span class="datetime-unit">분</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>면접장소</label>
+          <select class="sch-location-input"></select>
+        </div>
+        <div class="field">
+          <label>팀</label>
+          <select class="sch-team-input"></select>
+        </div>
+        <div class="field">
+          <label>면접진행자</label>
+          <select class="sch-interviewer-input"></select>
+        </div>
+        <div class="field">
+          <label>구분</label>
+          <select class="sch-round-input"></select>
+        </div>
+        <div class="field">
+          <label>비고</label>
+          <input class="sch-note-input" type="text" />
+        </div>
+        <div class="field">
+          <label>상태</label>
+          <select class="sch-status-input">
+            <option value="예정">예정</option>
+            <option value="취소">취소</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>변경/취소 사유 (선택)</label>
+          <input class="sch-reason-input" type="text" placeholder="일시를 바꾸거나 취소할 때 사유를 남기면 기록됩니다" />
+        </div>
+      </div>
+      <p class="tpl-status sch-status-msg"></p>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
