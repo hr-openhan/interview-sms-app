@@ -15,6 +15,8 @@
       </div>
       <nav class="tabs">
         <button class="tab-btn active" data-tab="resume" data-menus="resume">이력서 검토</button>
+        <button class="tab-btn" data-tab="posting" data-menus="resume">공고 만들기</button>
+        <button class="tab-btn" data-tab="applicants" data-menus="resume">지원자 관리</button>
         <button class="tab-btn" data-tab="send" data-menus="send history schedule">문자 보내기</button>
         <button class="tab-btn" data-tab="manage" data-menus="templates">양식 관리</button>
       </nav>
@@ -279,7 +281,7 @@
         <div class="preview-head">
           <span class="preview-label">회사 정보 (사명 · 비전 / 공통 인재상)</span>
         </div>
-        <p class="manage-hint">공고문 초안과 AI 평가에 쓰여요. 고치려면 <b>수정</b>을 누르고, 끝나면 <b>저장</b>을 눌러주세요.</p>
+        <p class="manage-hint">공고 AI 초안과 이력서 평가가 참고해요. 여기서는 <strong>보기만</strong> 할 수 있어요.</p>
         <div class="field">
           <label for="companyIntroInput">회사 소개 (사명 · 비전)</label>
           <textarea id="companyIntroInput" rows="6" readonly></textarea>
@@ -288,35 +290,221 @@
           <label for="idealProfileInput">공통 인재상</label>
           <textarea id="idealProfileInput" rows="8" readonly></textarea>
         </div>
-        <div class="criteria-actions" data-edit="resume">
-          <button id="editCriteriaBtn" class="add-btn" type="button">✏️ 수정</button>
-          <button id="saveCriteriaBtn" class="add-btn" type="button" hidden>저장</button>
-          <button id="cancelCriteriaBtn" class="link-btn" type="button" hidden>취소</button>
-          <button id="resetCriteriaBtn" class="link-btn" type="button" hidden>문서 기본값으로 되돌리기</button>
-        </div>
         <p class="status" id="criteriaStatus"></p>
 
         <details class="rubric-box">
-          <summary>평가표 보기 (총 100점)</summary>
+          <summary>평가표 보기 (총 100점 · 경력직 / 신입직)</summary>
+          <p class="manage-hint">공고의 <strong>채용 유형</strong>에 따라 평가표가 달라져요. 항목마다 S/A/B/C 기준을 두고, 그 사이 점수도 줄 수 있어요. 재직 여부·입사 가능 시기, 통근·거주지, 희망 연봉은 <strong>점수가 아니라 "면접에서 확인할 것"</strong>으로만 보여줘요.</p>
+          <p class="manage-hint" style="margin-bottom:2px"><strong>경력직</strong> (기본)</p>
           <table class="history-table stack-table rubric-table">
             <thead>
               <tr><th>평가 영역</th><th>세부 항목</th><th>배점</th><th>평가 기준</th></tr>
             </thead>
             <tbody id="rubricBody"></tbody>
           </table>
+          <p class="manage-hint" style="margin:10px 0 2px"><strong>신입직</strong></p>
+          <table class="history-table stack-table rubric-table">
+            <thead>
+              <tr><th>평가 영역</th><th>세부 항목</th><th>배점</th><th>평가 기준</th></tr>
+            </thead>
+            <tbody id="rubricBodyJunior"></tbody>
+          </table>
         </details>
       </section>
 
       <section class="panel" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
         <div class="preview-head">
+          <span class="preview-label">이력서 평가</span>
+        </div>
+        <div class="field">
+          <label for="evalPositionSelect">평가할 공고 (확정된 공고만 보여요)</label>
+          <select id="evalPositionSelect"></select>
+        </div>
+        <div class="input-mode">
+          <label class="check-chip"><input type="radio" name="resumeMode" value="pdf" checked /> PDF 올리기</label>
+          <label class="check-chip"><input type="radio" name="resumeMode" value="text" /> 글 붙여넣기</label>
+          <label class="check-chip"><input type="radio" name="resumeMode" value="notion" /> 노션에서 불러오기</label>
+        </div>
+
+        <div id="notionPickBox" class="field" hidden>
+          <p class="manage-hint" style="margin-top:0">노션에 PDF로 올려 둔 지원자 이력서를 가져와서 지금 평가표로 채점해요. 채용된 사람·탈락한 사람을 몇 명 채점해서 기록하면, 아래 "점수 기준"이 쌓여요.</p>
+          <button id="openNotionReviewPickerBtn" class="add-btn" type="button">📋 노션 지원자 고르기</button>
+          <div id="notionReviewChosen" class="pdf-info" hidden>
+            <span id="notionReviewName" class="pdf-info-name"></span>
+            <span id="notionReviewMeta" class="manage-hint" style="margin:0"></span>
+            <button id="notionReviewClearBtn" class="link-btn" type="button">선택 취소</button>
+          </div>
+          <div id="notionFileChoice" class="file-choice" hidden></div>
+        </div>
+
+        <div id="pdfBox" class="field">
+          <label id="pdfDrop" class="pdf-drop" for="resumeFile">
+            <input id="resumeFile" type="file" accept="application/pdf,.pdf" />
+            <span class="pdf-drop-title">이력서 PDF를 여기에 끌어다 놓거나 눌러서 고르세요</span>
+            <span class="manage-hint" style="margin:0">4MB 이하 · 스캔한 PDF도 읽어요 · 이름·연락처를 읽어서 아래 노션 등록 칸에 채워줘요</span>
+          </label>
+          <div id="pdfInfo" class="pdf-info" hidden>
+            <span id="pdfInfoName" class="pdf-info-name"></span>
+            <span id="pdfInfoSize" class="manage-hint" style="margin:0"></span>
+            <button id="pdfClearBtn" class="link-btn" type="button">파일 지우기</button>
+          </div>
+        </div>
+
+        <div id="textBox" class="field" hidden>
+          <label for="resumeTextInput">이력서 · 포트폴리오 내용 붙여넣기</label>
+          <textarea id="resumeTextInput" rows="14" placeholder="이력서 원문을 여기에 복사해서 붙여넣으세요."></textarea>
+        </div>
+        <label class="check-chip" style="margin-bottom:8px"><input id="usePeers" type="checkbox" checked /> 노션의 이전 서류 합격자를 참고해서 평가 (같은 팀 합격자의 <strong>지원직무·전공·주요경력</strong>만 AI에게 보내요. 이름·연락처·나이·연봉·학교 이름은 보내지 않아요)</label>
+        <button id="screenResumeBtn" class="send-btn">평가하기</button>
+        <p class="status" id="resumeStatus"></p>
+
+        <div id="resumeResult" class="resume-result" hidden>
+          <p class="resume-result-position" id="resultPosition"></p>
+          <div class="resume-result-score">
+            <span id="resumeTotal"></span><span class="resume-score-max">/100</span>
+            <span class="resume-ai-total" id="resumeAiTotal"></span>
+          </div>
+          <p class="manage-hint">점수는 AI가 매긴 1차 평가로, <strong>검토 우선순위를 잡는 참고</strong>예요. 학력·전공 점수도 총점에 들어가지만 <strong>추천은 학력을 뺀 점수로만</strong> 정하고, 점수가 낮아도 탈락으로 표시하지 않아요(탈락 여부는 사람이 정해요). 점수 칸을 직접 고치면 총점은 바로 다시 계산되지만 추천은 다시 계산되지 않아요.</p>
+          <table class="history-table stack-table score-table">
+            <thead>
+              <tr><th>평가 영역</th><th>배점</th><th>점수 (수정 가능)</th><th>AI 평가 근거</th></tr>
+            </thead>
+            <tbody id="scoreBody"></tbody>
+          </table>
+          <p><strong>서류 총평:</strong> <span id="resumeSummary"></span></p>
+          <p><strong>검토 우선순위 (참고):</strong> <span id="resumeRecommendation"></span></p>
+          <p class="manage-hint" id="resumeRecNote" style="margin-top:-6px"></p>
+          <div id="peerBox">
+            <strong>전공 · 이전 서류 합격자와 비교 (참고)</strong>
+            <p class="manage-hint" style="margin:2px 0 4px">합격자와 닮았다고 가점하거나 달라서 감점하지 않도록 AI에게 지시했어요. 학교 이름·수준·나이는 비교에 쓰지 않아요. 합격·탈락은 사람이 정해요.</p>
+            <ul class="req-list" id="peerList"></ul>
+          </div>
+          <div id="requirementsBox" hidden>
+            <strong>필수 요건 체크 (참고)</strong>
+            <p class="manage-hint" style="margin:2px 0 4px">점수와 별개예요. 이력서에 없으면 "미충족"이 아니라 "확인불가"로 표시하고, 탈락 기준이 아니에요.</p>
+            <ul id="resumeRequirements" class="req-list"></ul>
+          </div>
+          <div id="interviewBox">
+            <strong>면접에서 확인할 것 (점수 아님)</strong>
+            <p class="manage-hint" style="margin:2px 0 4px">점수와 추천에 쓰지 않는 참고 정보예요. 이력서에 적힌 내용만 보여주고, 주소는 읽지 않아요.</p>
+            <ul id="resumeInterviewChecks" class="req-list"></ul>
+          </div>
+          <div>
+            <strong>강점</strong>
+            <ul id="resumeStrengths"></ul>
+          </div>
+          <div>
+            <strong>우려사항</strong>
+            <ul id="resumeConcerns"></ul>
+          </div>
+          <div id="missingDocsBox" hidden>
+            <strong>이력서에서 확인되지 않은 제출 서류</strong>
+            <ul id="resumeMissingDocs"></ul>
+          </div>
+          <div id="valuesBox" hidden>
+            <strong>인재상과 연결되는 근거</strong>
+            <ul id="resumeValues"></ul>
+          </div>
+
+          <div id="benchmarkBox" class="benchmark-box" hidden></div>
+
+          <div id="notionRecordBox" class="notion-register" hidden>
+            <strong>노션 카드에 점수 기록</strong>
+            <p id="notionRecordTarget" class="manage-hint"></p>
+            <div class="field-row">
+              <div class="field"><label for="notionRecordRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRecordRec"></select></div>
+            </div>
+            <p class="manage-hint">기록하는 칸: 종합점수 · 평가 요약 · 평가일시 · 추천. 면접상태 같은 다른 칸은 바꾸지 않아요. 위에서 고친 점수가 기록돼요.</p>
+            <button id="notionRecordBtn" class="add-btn" type="button">노션 점수 칸에 기록</button>
+            <p class="status" id="notionRecordStatus"></p>
+          </div>
+
+          <div id="notionRegisterBox" class="notion-register">
+            <strong>노션 "진행중 채용"에 지원자 등록</strong>
+            <p class="manage-hint">사람이 확인하고 합격시킬 지원자만 등록하세요. 위에서 고친 점수가 종합점수로 들어가요.</p>
+            <p id="notionRegisterNotice" class="manage-hint" hidden></p>
+            <div id="notionRegisterForm">
+              <p id="notionExtractNote" class="extract-note" hidden></p>
+              <div class="field-row">
+                <div class="field"><label for="notionName">이름</label><input id="notionName" type="text" autocomplete="off" /></div>
+                <div class="field"><label for="notionPhone">연락처</label><input id="notionPhone" type="tel" autocomplete="off" placeholder="010-1234-5678" /></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="notionTeam">팀명</label><select id="notionTeam"></select></div>
+                <div class="field"><label for="notionStatusSel">면접상태</label><select id="notionStatusSel"></select></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="notionAppliedAt">입사지원일</label><input id="notionAppliedAt" type="date" /></div>
+                <div class="field"><label for="notionRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRec"></select></div>
+              </div>
+              <div class="field">
+                <label>지원채널</label>
+                <div id="notionChannels" class="check-group"></div>
+              </div>
+              <button id="notionRegisterBtn" class="add-btn" type="button">서류 합격 확정 (노션에 등록)</button>
+              <p class="manage-hint">확정하면 노션 「진행중 채용」에 지원자 카드가 만들어져요. 이어서 면접 일정을 확인하고 면접 문자를 보내세요. (합격·탈락은 사람이 정해요)</p>
+              <p class="status" id="notionRegisterStatus"></p>
+              <p class="status" id="notionAttachStatus"></p>
+              <button id="notionRetryAttachBtn" class="link-btn" type="button" hidden>PDF 다시 붙이기</button>
+              <div id="afterRegister" class="after-register" hidden>
+                <span class="manage-hint" style="margin:0">서류 합격을 확정했어요. 이어서 면접 일정을 확인하고 문자를 보내세요:</span>
+                <button id="fillSendBtn" class="add-btn" type="button" data-edit="send">📨 면접 문자 보내기</button>
+                <button id="fillScheduleBtn" class="add-btn" type="button" data-edit="schedule">📅 면접 일정 등록</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="batchSection" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
+        <h2>여러 이력서 한꺼번에 점수 보기</h2>
+        <p class="manage-hint">위 "평가할 공고"를 고른 뒤 PDF 이력서를 여러 개 올리면(최대 20개, 파일당 4MB 이하) <strong>점수만 표로 보여줘요.</strong> 노션 페이지는 <strong>자동으로 만들지 않아요.</strong> 서류 합격시킬 사람은 줄 끝의 <strong>"서류 합격 확정"</strong> 버튼을 직접 눌러주세요. 확정하면 노션에 지원자 카드가 만들어지고, 이어서 면접 문자·일정 등록으로 넘어갈 수 있어요. 점수는 검토 순서를 정하는 참고이고, 합격·탈락은 사람이 정해요. 평가 결과는 저장되지 않아서 화면을 닫으면 사라져요(노션에 등록한 사람만 남아요).</p>
+        <div class="field"><input id="batchFiles" type="file" accept="application/pdf,.pdf" multiple aria-label="이력서 PDF 여러 개 고르기" /></div>
+        <p class="manage-hint" id="batchFileInfo"></p>
+        <label class="check-chip" style="margin-bottom:8px"><input id="batchUsePeers" type="checkbox" checked /> 노션의 이전 서류 합격자를 참고해서 평가 (지원직무·전공·주요경력만 보내요)</label>
+        <div class="posting-actions">
+          <button id="batchRunBtn" class="add-btn" type="button">점수 보기</button>
+          <button id="batchClearBtn" class="link-btn" type="button">목록 비우기</button>
+          <select id="batchSort" aria-label="정렬"><option value="score">총점 높은 순</option><option value="file">올린 순서</option></select>
+        </div>
+        <p class="status" id="batchStatus"></p>
+        <table class="history-table stack-table batch-table" id="batchTable" hidden>
+          <thead>
+            <tr><th>#</th><th>지원자 · 파일</th><th>총점</th><th>검토 우선순위</th><th>필수 요건</th><th>확인 필요</th><th></th></tr>
+          </thead>
+          <tbody id="batchBody"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <div id="postingView" class="resume-view" hidden>
+      <section class="panel" data-menu="resume" data-edit="resume">
+        <div class="preview-head">
           <span class="preview-label">공고 만들기</span>
         </div>
-        <p class="manage-hint">① 팀 → ② 포지션 → ③ 근무 조건 순서로 입력하고 공고문을 만들어요. <b>확정한 공고</b>가 아래 "이력서 평가"의 기준이 돼요.</p>
+        <p class="manage-hint">① 팀 → ② 포지션 → ③ 근무 조건 순서로 입력하고 공고문을 만들어요. <strong>확정한 공고</strong>가 <strong>이력서 검토</strong> 탭에서 평가의 기준이 돼요. (AI 초안은 이력서 검토 탭에 있는 회사 소개·공통 인재상을 참고해요)</p>
+        <details id="importBox" class="rubric-box">
+          <summary>기존 공고에서 가져오기 (사람인 등에 올린 공고 → 팀·포지션별로 골라 저장)</summary>
+          <p class="manage-hint">이미 올린 공고 글을 붙여넣으면 팀·포지션별로 나눠 줘요. 저장할 것만 골라 저장하면 <b>공고 데이터가 되고, 확정한 공고는 이력서 채점의 기준</b>이 돼요. 회사 소개·복지·전형 절차 같은 공통 내용은 빼고, 근무지(강남, SCM팀·와우서비스팀은 남양주)·수습 3개월·급여(면접 후 협상)는 기본값으로 채워요.</p>
+          <div class="field"><textarea id="importText" rows="8" maxlength="60000" placeholder="사람인·잡코리아 공고 글을 여기에 붙여넣으세요"></textarea></div>
+          <div class="posting-actions">
+            <button id="importSplitBtn" class="add-btn" type="button">✨ 팀·포지션별로 나누기 (AI)</button>
+            <button id="importSingleBtn" class="link-btn" type="button">이 글 전체를 한 공고로 가져오기</button>
+          </div>
+          <p class="status" id="importStatus"></p>
+          <div id="importList" class="import-list"></div>
+          <div id="importSaveBox" hidden>
+            <div class="posting-actions">
+              <label class="check-chip"><input type="radio" name="importStatusSel" value="confirmed" checked /> 확정으로 저장 (바로 이력서 채점의 기준으로 사용)</label>
+              <label class="check-chip"><input type="radio" name="importStatusSel" value="draft" /> 작성 중으로 저장</label>
+            </div>
+            <button id="importSaveBtn" class="add-btn" type="button">선택한 공고 저장</button>
+          </div>
+        </details>
         <div class="field-row">
           <div class="field">
             <label for="postTeam">① 팀</label>
             <select id="postTeam"></select>
-            <input id="postTeamOther" type="text" maxlength="50" placeholder="새 팀 이름을 입력하세요 (예: 네스테어)" autocomplete="off" hidden />
           </div>
           <div class="field">
             <label for="postPosition">② 포지션</label>
@@ -325,6 +513,13 @@
           </div>
         </div>
         <p id="postPositionHint" class="manage-hint">처음에는 직접 입력하세요. 한 번 만든 포지션은 다음부터 이 칸에서 골라 쓸 수 있어요.</p>
+        <div class="field">
+          <label for="postProfile">채용 유형 (평가표가 달라져요)</label>
+          <select id="postProfile">
+            <option value="experienced">경력직 — 유사 경력·연차 중심 평가표</option>
+            <option value="junior">신입직 — 프로젝트·학력·자격 중심 평가표</option>
+          </select>
+        </div>
         <button id="loadPrevPostingBtn" class="link-btn" type="button" hidden>이 포지션의 이전 공고 불러오기</button>
         <div class="field-row">
           <div class="field">
@@ -436,131 +631,29 @@
           <pre id="postingDetailJd"></pre>
         </div>
       </section>
+    </div>
 
-      <section class="panel" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
-        <div class="preview-head">
-          <span class="preview-label">이력서 평가</span>
+    <div id="applicantsView" class="resume-view" hidden>
+      <section class="panel" data-menu="resume">
+        <h2>지원자 관리</h2>
+        <p class="manage-hint">노션 「진행중 채용」과 <strong>같은 데이터</strong>예요. 여기서 합격 여부·면접 일정을 바꾸면 노션에 바로 반영되고, 노션에서 바꾼 내용은 <strong>새로고침</strong>하면 여기에도 보여요. 탈락·채용은 AI가 아니라 <strong>사람이 직접</strong> 바꿔요.</p>
+        <p class="status err" id="apNotice" hidden></p>
+        <div class="ap-filters">
+          <select id="apStatus" aria-label="면접상태"></select>
+          <select id="apTeam" aria-label="팀"><option value="">전체 팀</option></select>
+          <input id="apSearch" type="search" maxlength="50" placeholder="이름 검색" autocomplete="off" aria-label="이름 검색" />
+          <button id="apRefresh" class="link-btn" type="button">🔄 새로고침</button>
+          <a id="apNotionLink" class="link-btn" href="#" target="_blank" rel="noopener" hidden>노션에서 열기</a>
         </div>
-        <div class="field">
-          <label for="evalPositionSelect">평가할 공고 (확정된 공고만 보여요)</label>
-          <select id="evalPositionSelect"></select>
-        </div>
-        <div class="input-mode">
-          <label class="check-chip"><input type="radio" name="resumeMode" value="pdf" checked /> PDF 올리기</label>
-          <label class="check-chip"><input type="radio" name="resumeMode" value="text" /> 글 붙여넣기</label>
-          <label class="check-chip"><input type="radio" name="resumeMode" value="notion" /> 노션에서 불러오기</label>
-        </div>
-
-        <div id="notionPickBox" class="field" hidden>
-          <p class="manage-hint" style="margin-top:0">노션에 PDF로 올려 둔 지원자 이력서를 가져와서 지금 평가표로 채점해요. 채용된 사람·탈락한 사람을 몇 명 채점해서 기록하면, 아래 "점수 기준"이 쌓여요.</p>
-          <button id="openNotionReviewPickerBtn" class="add-btn" type="button">📋 노션 지원자 고르기</button>
-          <div id="notionReviewChosen" class="pdf-info" hidden>
-            <span id="notionReviewName" class="pdf-info-name"></span>
-            <span id="notionReviewMeta" class="manage-hint" style="margin:0"></span>
-            <button id="notionReviewClearBtn" class="link-btn" type="button">선택 취소</button>
-          </div>
-          <div id="notionFileChoice" class="file-choice" hidden></div>
-        </div>
-
-        <div id="pdfBox" class="field">
-          <label id="pdfDrop" class="pdf-drop" for="resumeFile">
-            <input id="resumeFile" type="file" accept="application/pdf,.pdf" />
-            <span class="pdf-drop-title">이력서 PDF를 여기에 끌어다 놓거나 눌러서 고르세요</span>
-            <span class="manage-hint" style="margin:0">4MB 이하 · 스캔한 PDF도 읽어요 · 이름·연락처를 읽어서 아래 노션 등록 칸에 채워줘요</span>
-          </label>
-          <div id="pdfInfo" class="pdf-info" hidden>
-            <span id="pdfInfoName" class="pdf-info-name"></span>
-            <span id="pdfInfoSize" class="manage-hint" style="margin:0"></span>
-            <button id="pdfClearBtn" class="link-btn" type="button">파일 지우기</button>
-          </div>
-        </div>
-
-        <div id="textBox" class="field" hidden>
-          <label for="resumeTextInput">이력서 · 포트폴리오 내용 붙여넣기</label>
-          <textarea id="resumeTextInput" rows="14" placeholder="이력서 원문을 여기에 복사해서 붙여넣으세요."></textarea>
-        </div>
-        <button id="screenResumeBtn" class="send-btn">평가하기</button>
-        <p class="status" id="resumeStatus"></p>
-
-        <div id="resumeResult" class="resume-result" hidden>
-          <p class="resume-result-position" id="resultPosition"></p>
-          <div class="resume-result-score">
-            <span id="resumeTotal"></span><span class="resume-score-max">/100</span>
-            <span class="resume-ai-total" id="resumeAiTotal"></span>
-          </div>
-          <p class="manage-hint">점수는 AI가 매긴 1차 평가예요. 사람이 확인해서 점수 칸을 직접 고치면 총점이 바로 다시 계산돼요.</p>
-          <table class="history-table stack-table score-table">
-            <thead>
-              <tr><th>평가 영역</th><th>배점</th><th>점수 (수정 가능)</th><th>AI 평가 근거</th></tr>
-            </thead>
-            <tbody id="scoreBody"></tbody>
-          </table>
-          <p><strong>서류 총평:</strong> <span id="resumeSummary"></span></p>
-          <p><strong>추천 의견 (참고):</strong> <span id="resumeRecommendation"></span></p>
-          <div>
-            <strong>강점</strong>
-            <ul id="resumeStrengths"></ul>
-          </div>
-          <div>
-            <strong>우려사항</strong>
-            <ul id="resumeConcerns"></ul>
-          </div>
-          <div id="missingDocsBox" hidden>
-            <strong>이력서에서 확인되지 않은 제출 서류</strong>
-            <ul id="resumeMissingDocs"></ul>
-          </div>
-          <div id="valuesBox" hidden>
-            <strong>인재상과 연결되는 근거</strong>
-            <ul id="resumeValues"></ul>
-          </div>
-
-          <div id="benchmarkBox" class="benchmark-box" hidden></div>
-
-          <div id="notionRecordBox" class="notion-register" hidden>
-            <strong>노션 카드에 점수 기록</strong>
-            <p id="notionRecordTarget" class="manage-hint"></p>
-            <div class="field-row">
-              <div class="field"><label for="notionRecordRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRecordRec"></select></div>
-            </div>
-            <p class="manage-hint">기록하는 칸: 종합점수 · 평가 요약 · 평가일시 · 추천. 면접상태 같은 다른 칸은 바꾸지 않아요. 위에서 고친 점수가 기록돼요.</p>
-            <button id="notionRecordBtn" class="add-btn" type="button">노션 점수 칸에 기록</button>
-            <p class="status" id="notionRecordStatus"></p>
-          </div>
-
-          <div id="notionRegisterBox" class="notion-register">
-            <strong>노션 "진행중 채용"에 지원자 등록</strong>
-            <p class="manage-hint">사람이 확인하고 합격시킬 지원자만 등록하세요. 위에서 고친 점수가 종합점수로 들어가요.</p>
-            <p id="notionRegisterNotice" class="manage-hint" hidden></p>
-            <div id="notionRegisterForm">
-              <p id="notionExtractNote" class="extract-note" hidden></p>
-              <div class="field-row">
-                <div class="field"><label for="notionName">이름</label><input id="notionName" type="text" autocomplete="off" /></div>
-                <div class="field"><label for="notionPhone">연락처</label><input id="notionPhone" type="tel" autocomplete="off" placeholder="010-1234-5678" /></div>
-              </div>
-              <div class="field-row">
-                <div class="field"><label for="notionTeam">팀명</label><select id="notionTeam"></select></div>
-                <div class="field"><label for="notionStatusSel">면접상태</label><select id="notionStatusSel"></select></div>
-              </div>
-              <div class="field-row">
-                <div class="field"><label for="notionAppliedAt">입사지원일</label><input id="notionAppliedAt" type="date" /></div>
-                <div class="field"><label for="notionRec">추천 (AI 의견을 확인해 고쳐주세요)</label><select id="notionRec"></select></div>
-              </div>
-              <div class="field">
-                <label>지원채널</label>
-                <div id="notionChannels" class="check-group"></div>
-              </div>
-              <button id="notionRegisterBtn" class="add-btn" type="button">노션에 등록</button>
-              <p class="status" id="notionRegisterStatus"></p>
-              <p class="status" id="notionAttachStatus"></p>
-              <button id="notionRetryAttachBtn" class="link-btn" type="button" hidden>PDF 다시 붙이기</button>
-              <div id="afterRegister" class="after-register" hidden>
-                <span class="manage-hint" style="margin:0">등록한 지원자로 바로 이어서:</span>
-                <button id="fillSendBtn" class="add-btn" type="button" data-edit="send">📨 문자 보내기에 채우기</button>
-                <button id="fillScheduleBtn" class="add-btn" type="button" data-edit="schedule">📅 일정 등록에 채우기</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <p class="status" id="apMsg"></p>
+        <table class="history-table stack-table ap-table">
+          <thead>
+            <tr><th>이름</th><th>팀 · 직무</th><th>면접상태 (합격 여부·채용 과정)</th><th>1차 면접</th><th>2차 면접</th><th>점수 · 추천</th><th></th></tr>
+          </thead>
+          <tbody id="apBody"></tbody>
+        </table>
+        <p class="manage-hint" id="apCount"></p>
+        <button id="apMore" class="link-btn" type="button" hidden>더 보기</button>
       </section>
     </div>
 
