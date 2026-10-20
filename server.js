@@ -2691,7 +2691,15 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     if (filters.length === 1) body.filter = filters[0];
     else if (filters.length > 1) body.filter = { and: filters };
     const data = await notionRequest('POST', `/v1/databases/${NOTION_DB_ID}/query`, body);
-    res.json({ applicants: (data.results || []).map(pageToApplicant), hasMore: !!data.has_more, nextCursor: data.has_more ? (data.next_cursor || '') : '' });
+    let applicants = (data.results || []).map(pageToApplicant);
+    // 면접 일정(문자 보내기)과 짝지어 일치 여부도 함께 돌려줌. 일정에는 이름·연락처·장소가 있어서 "면접 일정 보기" 권한이 있을 때만 붙여요.
+    const user = req.auth && req.auth.user;
+    const canSeeSchedules = AUTH_MODE !== 'google' || hasPerm(user, 'schedule', 'view');
+    if (String(req.query.schedule || '') === '1' && canSeeSchedules) {
+      const schedules = await loadSchedules();
+      applicants = applicants.map(a => ({ ...a, scheduleCheck: compareSchedule(a, schedules) }));
+    }
+    res.json({ applicants, hasMore: !!data.has_more, nextCursor: data.has_more ? (data.next_cursor || '') : '', scheduleChecked: String(req.query.schedule || '') === '1' && canSeeSchedules });
   } catch (err) {
     sendNotionError(res, err);
   }
@@ -2709,6 +2717,55 @@ function toNotionDate(v, label) {
   return { date: { start: `${m[1]}T${m[2]}:${m[3]}:00${m[4] || '+09:00'}` } };
 }
 
+// ---------- 면접 일정(문자 보내기·면접 일정 화면) ↔ 노션 지원자(지원자 관리) 짝짓기 ----------
+// 같은 사람의 면접 일정이 두 곳에 따로 적혀 있어서, 서로 맞는지 비교해 보여줘요. 어느 쪽으로 맞출지는 사람이 골라요.
+const digitsOf = v => String(v || '').replace(/\D/g, '');
+// 노션 날짜('2026-10-23T14:30:00+09:00' / 'Z' / 날짜만)를 한국 시간 'YYYY-MM-DDTHH:mm'(날짜만이면 'YYYY-MM-DD')로
+function toKstMinute(v) {
+  const x = String(v || '').trim();
+  if (!x) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return x;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(x)) return x;           // 이미 한국 시간(일정 화면 형식)
+  const d = new Date(x);
+  if (isNaN(d)) return '';
+  const k = new Date(d.getTime() + 9 * 3600 * 1000);
+  return k.toISOString().slice(0, 16);
+}
+const ROUND_OF_NOTION = { interview1: '1차', interview2: '2차' };
+// 일정에서 이 지원자의 것 찾기: 연락처(숫자) 일치 우선, 없으면 이름+팀. 이름만 같은 경우는 짝으로 보지 않고 '확인 필요'로 남김
+function matchSchedulesFor(applicant, schedules) {
+  const ph = digitsOf(applicant.phone);
+  const teamNames = [applicant.team, ...Object.entries(TEAM_ALIASES).filter(([, v]) => v === applicant.team).map(([k]) => k)].filter(Boolean);
+  const byPhone = ph ? schedules.filter(sc => digitsOf(sc.phone) === ph) : [];
+  const sameName = schedules.filter(sc => sc.name && sc.name === applicant.name);
+  if (byPhone.length) {
+    // 연락처가 일치하는 일정만 짝으로 쓰되, 이름이 같은데 연락처가 다른 일정은 "확인 필요"로 남겨서 조용히 사라지지 않게 함(동명이인일 수도, 연락처가 바뀐 같은 사람일 수도 있음)
+    return { matches: byPhone, how: 'phone', ambiguous: sameName.filter(sc => !byPhone.includes(sc) && sc.status !== '취소') };
+  }
+  const byNameTeam = sameName.filter(sc => teamNames.includes(sc.team));
+  if (byNameTeam.length) return { matches: byNameTeam, how: 'nameTeam', ambiguous: [] };
+  return { matches: [], how: '', ambiguous: sameName.filter(sc => sc.status !== '취소') };   // 이름만 같은 일정: 동명이인일 수 있어서 자동으로 짝짓지 않음
+}
+function compareSchedule(applicant, schedules) {
+  const { matches, how, ambiguous } = matchSchedulesFor(applicant, schedules);
+  const active = matches.filter(sc => sc.status !== '취소');
+  const rows = [];
+  for (const [key, round] of Object.entries(ROUND_OF_NOTION)) {
+    const notionAt = toKstMinute(applicant[key]);
+    const sc = active.filter(x => x.round === round).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+    const schAt = sc ? sc.interviewAt : '';
+    let state;
+    if (!notionAt && !sc) continue;                                  // 양쪽 다 없으면 보여줄 게 없음
+    else if (notionAt && !sc) state = 'notion_only';
+    else if (!notionAt && sc) state = 'schedule_only';
+    else if (notionAt === schAt) state = 'match';
+    else if (notionAt.length === 10 && schAt.slice(0, 10) === notionAt) state = 'date_only';   // 노션엔 날짜만 있고 같은 날 → 시간은 노션에 없음
+    else state = 'diff';
+    rows.push({ round, state, notionAt, scheduleAt: schAt, scheduleId: sc ? sc.id : '', location: sc ? sc.location : '', interviewer: sc ? sc.interviewer : '' });
+  }
+  const noRound = active.filter(sc => !['1차', '2차'].includes(sc.round));   // 채용과제·구분 없음: 노션 면접일 칸과 대응이 없어 비교하지 않고 알려만 줌
+  return { how, rows, extra: noRound.map(sc => ({ id: sc.id, round: sc.round || '(구분 없음)', at: sc.interviewAt })), ambiguous: ambiguous.map(sc => ({ id: sc.id, name: sc.name, team: sc.team, round: sc.round, at: sc.interviewAt })), hasSchedule: active.length > 0 };
+}
 // 지원자의 합격 여부·채용 과정(면접상태, 면접일, 문자 안내, 메모, 입사일)을 노션에 바로 반영
 // 노션에서 그 사이 바뀌었으면(expectedEditedAt이 다르면) 덮어쓰지 않고 409로 알려줘요.
 app.patch('/api/notion/applicants/:id', requireNotion, ah(async (req, res) => {
