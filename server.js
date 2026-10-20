@@ -307,6 +307,8 @@ async function getAuth(req) {
   return user ? { authed: true, user } : { authed: false, revoked: true };
 }
 
+// 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
+const APP_VERSION = '2026.10.21-2';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -347,6 +349,7 @@ const PERMISSION_RULES = [
   R('PUT',    /^\/api\/postings\/[^/]+$/,        [['resume', 'edit']]),
   R('DELETE', /^\/api\/postings\/[^/]+$/,        [['resume', 'edit']]),
   R('GET',    /^\/api\/posting-defaults$/,       [['resume', 'view']]),
+  R('POST',   /^\/api\/postings\/check$/,        [['resume', 'edit']]),
   R('POST',   /^\/api\/postings\/import-split$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/postings\/import$/,       [['resume', 'edit']]),
   R('GET',    /^\/api\/team-brands$/,            [['resume', 'view']]),
@@ -451,10 +454,10 @@ app.get('/api/auth-status', ah(async (req, res) => {
 // 지금 로그인한 사람의 이름/권한 (화면이 메뉴를 보여주고 숨기는 데 씁니다)
 app.get('/api/me', ah(async (req, res) => {
   const a = req.auth;
-  if (!a || !a.authed) return res.json({ mode: AUTH_MODE, authed: false });
+  if (!a || !a.authed) return res.json({ mode: AUTH_MODE, authed: false, version: APP_VERSION });
   const u = a.user;
   res.json({
-    mode: AUTH_MODE, authed: true,
+    mode: AUTH_MODE, authed: true, version: APP_VERSION,
     email: u.email, name: u.name, role: u.role, perms: u.perms,
     canManage: AUTH_MODE === 'google' && u.role === 'owner',
     menus: MENUS,
@@ -619,7 +622,10 @@ app.delete('/api/admin/users/:email', ah(async (req, res) => {
   await saveUsers(users.filter(u => u.email !== email));
   res.json({ success: true });
 }));
-app.use(express.static(path.join(__dirname, 'public')));
+// 화면 파일(HTML·JS·CSS)은 매번 서버에 새로 확인하게 해서, 일부만 옛날 것이 남아 서로 어긋나는 일을 줄여요.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => { if (/\.(html|js|css)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache, must-revalidate'); },
+}));
 
 // 문자코리아 연결 진단 (.env에 저장된 값이 실제로 어떻게 읽히는지, 토큰 발급이 되는지 확인)
 // 저장소(Redis 또는 로컬 파일) 상태 진단 - 브라우저 주소창에 /api/storage-check 입력하면 바로 확인 가능
@@ -627,12 +633,24 @@ app.get('/api/storage-check', async (req, res) => {
   const result = {
     storageMode: kv ? 'upstash-redis' : 'local-file',
     redisEnvDetected: !!(REDIS_URL && REDIS_TOKEN),
+    redisUrlSet: !!REDIS_URL,
+    redisTokenSet: !!REDIS_TOKEN,
   };
+  // 가장 흔한 사고 원인을 사람이 읽을 수 있게 알려줌: Redis에 데이터가 있어도 앱이 Redis를 안 쓰고 빈 파일 저장소를 보고 있는 경우
+  if (!kv) {
+    result.warning = REDIS_URL && !REDIS_TOKEN
+      ? 'Redis 주소(URL)는 있는데 토큰(TOKEN)이 없어서 Redis를 쓰지 못하고 있어요. 지금 보이는 데이터는 Redis가 아니라 이 서버의 임시 파일이라, 재배포하면 사라져요. Redis에 있던 데이터는 지워진 게 아니에요. Vercel 환경변수에 UPSTASH_REDIS_REST_TOKEN(또는 KV_REST_API_TOKEN)을 넣고 다시 배포하세요.'
+      : (!REDIS_URL && REDIS_TOKEN
+        ? 'Redis 토큰은 있는데 주소(URL)가 없어서 Redis를 쓰지 못하고 있어요. 환경변수 UPSTASH_REDIS_REST_URL(또는 KV_REST_API_URL)을 확인하세요.'
+        : (REDIS_URL && REDIS_TOKEN
+          ? 'Redis 환경변수는 있는데 Redis 연결 도구(@upstash/redis)를 불러오지 못해서 임시 파일 저장소로 동작 중이에요. 이 상태의 데이터는 재배포하면 사라져요. npm install이 제대로 됐는지 확인하세요.'
+          : 'Redis 환경변수가 하나도 없어서 이 서버의 임시 파일에 저장하고 있어요. Vercel 같은 곳에서는 재배포나 일정 시간이 지나면 이 데이터가 사라져요. 이전에 Redis(Upstash)에 저장한 데이터가 있었다면 지워진 게 아니라 연결이 빠진 거예요. 환경변수 UPSTASH_REDIS_REST_URL과 UPSTASH_REDIS_REST_TOKEN을 다시 넣어주세요.'));
+  }
 
   if (kv) {
     try {
-      await kv.set('__healthcheck__', { ok: true, ts: Date.now() });
-      const readBack = await kv.get('__healthcheck__');
+      await withTimeout(kv.set('__healthcheck__', { ok: true, ts: Date.now() }), 4000, 'Redis 쓰기 확인');
+      const readBack = await withTimeout(kv.get('__healthcheck__'), 4000, 'Redis 읽기 확인');
       result.redisRoundTrip = { ok: true, readBack };
     } catch (err) {
       result.redisRoundTrip = { ok: false, error: err.message };
@@ -646,6 +664,28 @@ app.get('/api/storage-check', async (req, res) => {
     result.templatesError = err.message;
   }
 
+  // 데이터가 지워진 건지, 안 보이는 것뿐인지 가려내기 위한 건수 확인 (읽기만 하고 아무것도 바꾸지 않아요)
+  // Redis 조회가 실패하면 앱은 조용히 빈 목록으로 보여주기 때문에, 여기서는 실패를 숨기지 않고 따로 알려줘요.
+  // 8개를 하나씩 읽으면 Redis가 응답 없을 때 8초×8번(1분 넘게) 멈추므로, 동시에 읽고 점검용 대기 시간도 짧게(4초) 둠
+  const raw = async (key, filePath) => {
+    try {
+      if (kv) { const v = await withTimeout(kv.get(key), 4000, `Redis 조회(${key})`); return { ok: true, value: v }; }
+      if (!fs.existsSync(filePath)) return { ok: true, value: null };   // 파일이 없는 건 오류가 아니라 "저장된 적 없음"(재배포로 지워졌을 수도 있어요)
+      return { ok: true, value: JSON.parse(fs.readFileSync(filePath, 'utf-8')) };
+    } catch (err) { return { ok: false, error: err.message }; }
+  };
+  const count = v => Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : (v == null ? 0 : 1));
+  const targets = [
+    ['history', '문자 발송 이력', HISTORY_PATH], ['schedules', '면접 일정', SCHEDULES_PATH], ['templates', '문자 양식(직접 수정한 것)', TEMPLATES_PATH],
+    ['postings', '공고', POSTINGS_PATH], ['criteria', '사명·인재상 저장본', CRITERIA_PATH], ['posting_defaults', '공고 기본값·공통 안내', POSTING_DEFAULTS_PATH],
+    ['team_refs', '팀 직무 참고', TEAM_REF_PATH], ['team_brands', '팀이 맡은 브랜드', TEAM_BRANDS_PATH],
+  ];
+  result.dataCounts = {};
+  const reads = await Promise.all(targets.map(([key, label, fp]) => raw(key, fp)));
+  targets.forEach(([key, label], i) => {
+    const r = reads[i];
+    result.dataCounts[key] = r.ok ? { label, saved: r.value != null, count: count(r.value) } : { label, error: r.error };
+  });
   res.json(result);
 });
 
@@ -867,6 +907,16 @@ app.post('/api/check-text', ah(async (req, res) => {
   res.json({ fixes: r.fixes, invalid: r.invalid });
 }));
 
+// 문자 본문에 "채워지지 않은 칸"이 남아 있는지 찾음. 지원자에게 그대로 나가면 안 되는 것들이에요.
+//  막음(block): 치환되지 않은 {{…}}, [입력]  /  확인(confirm): 【…】, 날짜가 필요한 양식의 빈 날짜
+function findLeftovers(message, { hasDate, date } = {}) {
+  const block = [], confirmList = [];
+  for (const m of message.matchAll(/\{\{[^}]*\}\}/g)) block.push({ code: 'template', text: m[0], tip: '양식 문법이 채워지지 않았어요. 양식 관리에서 확인하세요.' });
+  for (const m of message.matchAll(/\[입력\]/g)) block.push({ code: 'input', text: m[0], tip: '[입력]으로 남은 곳을 채우거나 지워주세요.' });
+  for (const m of message.matchAll(/【[^】]*】/g)) confirmList.push({ code: 'bracket', text: m[0], tip: '【 】 안은 직접 채우라는 표시예요. 채우거나 지운 뒤 보내세요.' });
+  if (hasDate && !String(date || '').trim()) confirmList.push({ code: 'nodate', text: '(날짜 비어 있음)', tip: '이 양식은 날짜가 들어가는 양식인데 날짜가 비어 있어요. 문장이 어색하게 나갈 수 있어요.' });
+  return { block, confirm: confirmList };
+}
 app.post('/api/send', ah(async (req, res) => {
   const { templateId, name, phone, date, memo, message: customMessage, notionPageId } = req.body;
 
@@ -897,6 +947,17 @@ app.post('/api/send', ah(async (req, res) => {
     });
   }
   message = cleaned.text;
+  // 채워지지 않은 칸이 남은 채로 지원자에게 나가지 않게: 치환 안 된 {{…}}·[입력]은 막고, 【 】·빈 날짜는 사람이 확인한 뒤에만 보냄
+  // 화면은 미리보기에 보이는 문구를 항상 message로 같이 보내요. 그래서 "message가 있나"가 아니라 "양식을 그대로 채운 문구와 같은가"로 사람이 직접 고쳤는지 판단해요.
+  const autoMessage = sanitizeSms(tpl.body.replaceAll('{{name}}', name).replaceAll('{{date}}', date || '')).text;
+  const editedByHand = typeof customMessage === 'string' && customMessage.trim() !== '' && sanitizeSms(customMessage).text !== autoMessage;
+  const leftovers = findLeftovers(message, { hasDate: tpl.hasDate && !editedByHand, date });
+  if (leftovers.block.length) {
+    return res.status(400).json({ success: false, code: 'leftover_block', error: `문자에 채워지지 않은 칸이 남아 있어요: ${[...new Set(leftovers.block.map(x => x.text))].slice(0, 5).join(', ')}. 채우거나 지운 뒤 다시 보내주세요.`, leftovers: leftovers.block });
+  }
+  if (leftovers.confirm.length && req.body.confirmLeftover !== true) {
+    return res.status(409).json({ success: false, code: 'leftover_confirm', error: `문자에 확인이 필요한 칸이 남아 있어요: ${[...new Set(leftovers.confirm.map(x => x.text))].slice(0, 5).join(', ')}`, leftovers: leftovers.confirm });
+  }
   const sendFixes = cleaned.fixes;
   const safeName = sanitizeSms(name).text.trim();
   const safeTitle = sanitizeSms(tpl.label).text;
@@ -1646,6 +1707,97 @@ app.put('/api/posting-defaults', ah(async (req, res) => {
   const store = { ...next };
   await storeSet('posting_defaults', POSTING_DEFAULTS_PATH, store);
   res.json({ success: true, ...(await loadPostingDefaults()) });
+}));
+
+// ---------- 공고 리스크 점검 (규칙 기반, AI를 쓰지 않아서 같은 글이면 항상 같은 결과가 나와요) ----------
+// 법률 자문이 아니라 "놓치기 쉬운 표현을 미리 걸러주는 점검"이에요. 판단은 사람이 해요.
+// 수정 필요(error): 직무와 무관한 개인정보 요구, 비어 있는 칸 / 확인 필요(warn): 차별·과장으로 읽힐 수 있는 표현, 빠진 안내 / 참고(info)
+const POSTING_RULES = [
+  { code: 'age', level: 'warn', title: '나이를 제한하거나 암시하는 표현', tip: '직무에 필요한 경험·역량(예: 경력 연차)으로 바꿔 쓰세요.',
+    re: [/(만\s*)?\d{2}\s*세\s*(이하|미만|이상|까지|전후)/g, /\d{2}\s*년생/g, /\d{2}\s*대\s*(지원자|분|위주|선호|우대|직원|사원|신입|초반|중반|후반)/g, /젊은\s*(분|사람|층|직원|인재|피)|나이\s*제한|연령\s*(제한|무관\s*아님)/g] },
+  { code: 'generation', level: 'warn', title: '세대를 암시하는 표현', tip: '"MZ", "디지털 원어민" 같은 말 대신 필요한 역량(예: 숏폼 제작 경험)을 쓰세요.',
+    re: [/MZ\s*(세대)?|디지털\s*(원어민|네이티브)|젊은\s*감각|패기\s*있는\s*젊은/g] },
+  { code: 'gender', level: 'warn', title: '성별을 제한하거나 선호하는 표현', tip: '직무 수행과 관계없는 성별 조건은 쓰지 마세요.',
+    re: [/(남성|남자|여성|여자)\s*(만|한정|우대|선호|지원\s*가능|지원자)/g, /남\s*[\/·]\s*여\s*(한정|우대)|군필\s*(자)?\s*(우대|필수)/g] },
+  { code: 'appearance', level: 'warn', title: '외모·신체 조건', tip: '직무와 관련 없는 신체·외모 조건은 쓰지 마세요.',
+    re: [/용모\s*단정|외모|훈남|훈녀|미남|미녀|키\s*\d{3}|신장\s*\d{3}|체중|몸무게/g] },
+  { code: 'family', level: 'warn', title: '혼인·가족·출산 관련 표현', tip: '결혼·자녀·출산 관련 조건은 쓰지 마세요.',
+    re: [/미혼|기혼|결혼\s*(여부|예정|계획)|출산\s*(계획|예정)|자녀\s*(유무|계획)|가족\s*관계/g] },
+  { code: 'origin', level: 'warn', title: '출신 지역을 따지는 표현', tip: '출신 지역은 직무와 관계가 없어요. 근무 가능 지역을 쓰고 싶다면 "근무지"로 안내하세요.',
+    re: [/출신\s*지역|출신지|고향|(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)\s*(지역\s*)?출신/g] },
+  { code: 'school', level: 'warn', title: '학교 이름·명성을 따지는 표현', tip: '학교 이름 대신 직무에 필요한 전공·역량으로 쓰세요.',
+    re: [/학벌|명문대|SKY|(서울대|연세대|고려대|[가-힣]{2,6}대학교?)\s*(출신|졸업자?)\s*(우대|선호|만)/g] },
+  { code: 'etc', level: 'warn', title: '종교·장애·건강 상태를 가리는 표현', tip: '직무 수행에 꼭 필요한 조건이 아니라면 쓰지 마세요.',
+    re: [/종교|건강한\s*(분|사람)|신체\s*건강한|장애\s*(없는|제외)/g] },
+  { code: 'privacy', level: 'error', title: '직무와 무관한 개인정보를 요구하는 표현', tip: '지원 서류에 사진·혼인·가족·재산·신체·주민등록번호는 요구하지 마세요(채용절차법). 필요한 정보는 면접 후 입사 단계에서 받으세요.',
+    re: [/(증명)?사진\s*(첨부|필수|제출|부착)|주민\s*등록\s*번호|주민번호|가족\s*(사항|관계)\s*(기재|제출|작성)?|재산\s*(상태|관계)|부모(님)?\s*의?\s*(직업|학력)|혼인\s*(여부|관계)\s*(기재|제출)?|신체\s*(조건|사항)/g] },
+  { code: 'exaggeration', level: 'warn', title: '과장·허위로 읽힐 수 있는 표현', tip: '실제 조건과 다르면 안 돼요(허위 채용광고 금지). 보장할 수 없는 말은 빼세요.',
+    re: [/(고수익|고액)\s*(보장|확정)|월\s*[\d,]+\s*(만\s*원|천\s*만\s*원|원)?\s*(이상\s*)?(보장|확정)|무조건\s*(합격|채용)|100\s*%\s*(채용|합격|보장)|누구나\s*고수익/g] },
+  { code: 'placeholder', level: 'error', title: '아직 채우지 않은 칸', tip: '[입력]으로 남은 곳을 채우거나 지우세요.', re: [/\[입력\]/g] },
+  { code: 'aiTag', level: 'warn', title: 'AI가 추천해 둔 채 확인하지 않은 부분', tip: '내용이 맞는지 확인한 뒤 [추천] 표시를 지우세요.', re: [/\[추천\]/g] },
+  { code: 'education', level: 'info', title: '학력 제한 표현', tip: '학력이 직무에 꼭 필요한 조건인지 확인하세요. 필요 없다면 "학력 무관"으로 쓰는 게 안전해요.',
+    re: [/(고졸|대졸|대학\s*졸업|학사|석사|박사)\s*(이상|필수|학위\s*필수)/g] },
+];
+// 문제가 된 표현 앞뒤의 글을 "같은 줄 안에서, 단어 중간이 잘리지 않게" 보여줌(다른 줄·다른 문제의 단어가 섞여 헷갈리지 않게)
+function excerptOf(text, idx, len) {
+  const ls = text.lastIndexOf('\n', idx - 1) + 1;
+  let le = text.indexOf('\n', idx + len); if (le === -1) le = text.length;
+  let a = Math.max(ls, idx - 14), b = Math.min(le, idx + len + 14);
+  while (a > ls && a < idx && /\S/.test(text[a - 1]) && /\S/.test(text[a])) a++;          // 앞이 단어 중간이면 다음 공백까지 줄임
+  while (b < le && b > idx + len && /\S/.test(text[b]) && /\S/.test(text[b - 1])) b--;    // 뒤가 단어 중간이면 앞 공백까지 줄임
+  return (a > ls ? '…' : '') + text.slice(a, b).replace(/\s+/g, ' ').trim() + (b < le ? '…' : '');
+}
+function checkPostingText(jd, opts = {}) {
+  const text = String(jd || '');
+  const findings = [];
+  const lineOf = idx => text.slice(0, idx).split('\n').length;
+  for (const rule of POSTING_RULES) {
+    const seen = new Set();
+    for (const re of rule.re) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(text))) {
+        if (m[0] === '') { re.lastIndex++; continue; }
+        const key = m.index + ':' + m[0];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // 예외: "남녀 불문/무관" 앞뒤, "성별 무관" 같은 차별 금지 문구는 문제가 아님
+        const around = text.slice(Math.max(0, m.index - 6), m.index + m[0].length + 6);
+        if (['gender', 'age', 'generation', 'family', 'appearance', 'origin', 'school', 'etc'].includes(rule.code) && /(불문|무관|차별\s*없|제한\s*없)(?!\s*(아님|않|이\s*아니|하지\s*않))/.test(around)) continue;   // "무관 아님" 같은 부정이 붙으면 오히려 반대 뜻이라 예외로 보지 않음
+        findings.push({ code: rule.code, level: rule.level, title: rule.title, tip: rule.tip, excerpt: excerptOf(text, m.index, m[0].length), match: m[0], line: lineOf(m.index), start: m.index, end: m.index + m[0].length });
+      }
+    }
+  }
+  // 빠진 안내(지원자가 꼭 알아야 하는 내용)
+  const need = [
+    ['근무지', /근무지|근무\s*장소/, '근무지가 안 보여요.'],
+    ['고용 형태', /고용\s*형태|정규직|계약직|인턴|수습/, '고용 형태(정규직·계약직 등)가 안 보여요.'],
+    ['급여 안내', /급여|연봉|보수|임금/, '급여 안내가 없어요. 급여 정보가 없다는 점은 지원자가 가장 먼저 찾는 내용이에요.'],
+    ['전형 절차', /전형\s*절차|전형\s*과정|채용\s*절차|서류\s*전형|면접/, '전형 절차가 안 보여요(채용 일정·절차는 미리 알려야 해요).'],
+    ['지원 방법', /지원\s*방법|접수\s*방법|지원서\s*제출|이메일|메일로|이력서\s*(를\s*)?(제출|보내)/, '지원 방법이 안 보여요.'],
+  ];
+  for (const [label, re, msg] of need) if (!re.test(text)) findings.push({ code: 'missing', level: 'warn', title: `빠진 안내: ${label}`, tip: msg, excerpt: '', match: '', line: 0, start: -1, end: -1 });
+  // 급여를 '협상'으로만 적은 경우: 임금 범위 표기 권장(법적 의무는 아직 아니에요)
+  if (/급여|연봉|보수|임금/.test(text) && !/\d[\d,]*\s*(만\s*원|천\s*만|원)|[\d,]+\s*~\s*[\d,]+/.test(text) && /협상|면접\s*후\s*(결정|협의)|내규|회사\s*내규/.test(text)) {
+    findings.push({ code: 'salaryRange', level: 'info', title: '급여 범위가 적혀 있지 않아요', tip: '지금은 "면접 후 협상"만으로도 가능하지만, 연봉 범위를 적는 쪽으로 가는 흐름이에요(채용공고 임금 공개 의무화 법안이 논의 중이에요). 쓸 수 있다면 범위를 적어두세요.', excerpt: '', match: '', line: 0, start: -1, end: -1 });
+  }
+  // 접수 마감일이 이미 지남
+  if (opts.applyEnd && /^\d{4}-\d{2}-\d{2}$/.test(opts.applyEnd)) {
+    const today = opts.today || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+    if (opts.applyEnd < today) findings.push({ code: 'expired', level: 'warn', title: '접수 마감일이 이미 지났어요', tip: `마감일(${opts.applyEnd})을 확인하세요.`, excerpt: '', match: '', line: 0, start: -1, end: -1 });
+  }
+  if (text.replace(/\s+/g, '').length < 40) findings.push({ code: 'short', level: 'warn', title: '공고 내용이 너무 짧아요', tip: '하는 일, 필요한 분, 우대 사항을 구체적으로 적어주세요.', excerpt: '', match: '', line: 0, start: -1, end: -1 });
+  const order = { error: 0, warn: 1, info: 2 };
+  findings.sort((a, b) => order[a.level] - order[b.level] || a.start - b.start);
+  const count = { error: 0, warn: 0, info: 0 };
+  findings.forEach(f => count[f.level]++);
+  return { ok: count.error === 0 && count.warn === 0, count, findings: findings.slice(0, 60), total: findings.length };
+}
+app.post('/api/postings/check', ah(async (req, res) => {
+  const b = req.body || {};
+  if (typeof b.jd !== 'string') return res.status(400).json({ error: '점검할 공고문을 보내주세요.' });
+  if (b.jd.length > POSTING_LIMITS.jd) return res.status(400).json({ error: `공고문이 너무 길어요 (${POSTING_LIMITS.jd}자 이내).` });
+  res.json({ success: true, ...checkPostingText(b.jd, { applyEnd: typeof b.applyEnd === 'string' ? b.applyEnd : '' }) });
 }));
 
 // ---------- 팀이 맡은 브랜드 ----------
