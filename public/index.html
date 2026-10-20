@@ -15,8 +15,8 @@
       </div>
       <nav class="tabs">
         <button class="tab-btn active" data-tab="resume" data-menus="resume">이력서 검토</button>
-        <button class="tab-btn" data-tab="posting" data-menus="resume">공고 만들기</button>
         <button class="tab-btn" data-tab="applicants" data-menus="resume">지원자 관리</button>
+        <button class="tab-btn" data-tab="posting" data-menus="resume">공고 만들기</button>
         <button class="tab-btn" data-tab="send" data-menus="send history schedule">문자 보내기</button>
         <button class="tab-btn" data-tab="manage" data-menus="templates">양식 관리</button>
       </nav>
@@ -512,6 +512,7 @@
             <datalist id="postPositionList"></datalist>
           </div>
         </div>
+        <p id="postTeamBrand" class="manage-hint" hidden></p>
         <p id="postPositionHint" class="manage-hint">처음에는 직접 입력하세요. 한 번 만든 포지션은 다음부터 이 칸에서 골라 쓸 수 있어요.</p>
         <div class="field">
           <label for="postProfile">채용 유형 (평가표가 달라져요)</label>
@@ -552,16 +553,6 @@
           <button id="saveTeamWorkplaceBtn" class="link-btn" type="button">이 팀 근무지를 기본값으로 저장</button>
         </div>
         <p class="manage-hint">정규직이면 <b>수습 기간</b>, 계약직·인턴 등이면 <b>근무 기간</b>으로 공고에 적혀요. 근무지는 층수 없이 적고, 팀마다 다르면 "이 팀 근무지를 기본값으로 저장"으로 팀별로 기억해둘 수 있어요.</p>
-        <details id="noticeBox" class="rubric-box">
-          <summary>공통 안내 보기·수정 (근무 시간 · 전형 절차 · 지원 방법 · 복지)</summary>
-          <p class="manage-hint">AI 초안을 만들 때 공고문 맨 끝에 그대로 붙어요. 공고마다 달라지는 내용은 공고문 칸에서 직접 고치세요.</p>
-          <div class="field"><textarea id="postNotice" rows="16"></textarea></div>
-          <div class="posting-actions">
-            <button id="saveNoticeBtn" class="add-btn" type="button">공통 안내 저장</button>
-            <button id="resetNoticeBtn" class="link-btn" type="button">기본 문구로 되돌리기</button>
-          </div>
-          <p class="status" id="noticeStatus"></p>
-        </details>
         <details id="refBox" class="rubric-box">
           <summary>팀 직무 참고 보기·수정 (직무정의서에서 옮긴 내용)</summary>
           <p class="manage-hint">AI 공고 초안과 이력서 평가가 참고해요. <b>공개해도 되는 내용만</b> 적어주세요. (IPO 일정, 내부통제, 자회사, 인력 계획 같은 대외비는 넣지 마세요) 팀을 먼저 고르면 그 팀의 내용이 나와요.</p>
@@ -597,6 +588,37 @@
         </div>
         <span id="postTodo" class="manage-hint"></span>
         <p class="status" id="postStatus"></p>
+      </section>
+
+      <section class="panel" style="margin-top: 24px;" data-menu="resume">
+        <div class="preview-head"><span class="preview-label">팀 · 공고 기본 정보</span></div>
+        <p class="manage-hint">공고를 만들 때 쓰는 기본 정보예요. <strong>보기</strong> 권한이면 읽을 수 있고, <strong>수정</strong> 권한이 있을 때만 "수정" 버튼이 보여요.</p>
+        <details id="brandBox" class="rubric-box">
+          <summary>팀과 맡은 브랜드 보기·수정</summary>
+          <p class="manage-hint">공고의 팀은 문자 보내기·면접 일정과 <strong>같은 팀 목록</strong>이에요(팀 이름은 바꿀 수 없어요). 포지션(MD·포토 등)은 위에서 직접 입력해요. 인디비주엘·우일신처럼 <strong>팀이 맡은 브랜드</strong>는 아래에 적어두면 AI 공고 초안이 참고해요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요.</p>
+          <table class="history-table stack-table brand-table">
+            <thead><tr><th>팀</th><th>맡은 브랜드</th></tr></thead>
+            <tbody id="brandBody"></tbody>
+          </table>
+          <div class="posting-actions">
+            <button id="editBrandBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
+            <button id="saveBrandBtn" class="add-btn" type="button" hidden>저장</button>
+            <button id="cancelBrandBtn" class="link-btn" type="button" hidden>취소</button>
+          </div>
+          <p class="status" id="brandStatus"></p>
+        </details>
+        <details id="noticeBox" class="rubric-box">
+          <summary>공고 안내(공통 안내) 보기·수정 (근무 시간 · 전형 절차 · 지원 방법 · 복지)</summary>
+          <p class="manage-hint">AI 초안을 만들 때 공고문 맨 끝에 그대로 붙어요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요. 공고마다 달라지는 내용은 공고문 칸에서 직접 고치세요.</p>
+          <div class="field"><textarea id="postNotice" rows="16" readonly></textarea></div>
+          <div class="posting-actions">
+            <button id="editNoticeBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
+            <button id="saveNoticeBtn" class="add-btn" type="button" hidden>저장</button>
+            <button id="cancelNoticeBtn" class="link-btn" type="button" hidden>취소</button>
+            <button id="resetNoticeBtn" class="link-btn" type="button" hidden>기본 문구로 되돌리기</button>
+          </div>
+          <p class="status" id="noticeStatus"></p>
+        </details>
       </section>
 
       <section class="panel" style="margin-top: 24px;" data-menu="resume">

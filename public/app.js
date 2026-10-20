@@ -1597,6 +1597,7 @@ async function loadPostingDefaults() {
     const res = await fetch('/api/posting-defaults');
     const data = await res.json();
     if (!res.ok) return;
+    loadBrands();
     postingDefaults = { workplace: data.workplace || '', employmentType: data.employmentType || '', months: data.months || 3, applyMonths: data.applyMonths || 2, commonNotice: data.commonNotice || '', defaultCommonNotice: data.defaultCommonNotice || '', teamWorkplaces: data.teamWorkplaces || {} };
     document.getElementById('postNotice').value = postingDefaults.commonNotice;
     postTypes = data.employmentTypes || postTypes;
@@ -1619,6 +1620,7 @@ function applyDefaultsToForm() {
 let resumeDataReady = false;
 async function loadResumeData() {
   await Promise.all([loadCriteria(), loadPostings(), loadPostingDefaults()]);
+  if (!brandEditing) { renderBrands(); updateTeamBrandHint(); }   // 팀 목록이 채워진 뒤에 브랜드 표를 확실히 다시 그림
   if (!resumeDataReady) { resumeDataReady = true; if (!postDirty && !editingPosting) applyDefaultsToForm(); }
 }
 
@@ -1650,6 +1652,7 @@ postApplyStart.addEventListener('change', () => {
   if (!applyEndTouched && postApplyStart.value) postApplyEnd.value = addMonthsStr(postApplyStart.value, postingDefaults.applyMonths || 2);
 });
 function onTeamChanged() {
+  updateTeamBrandHint();
   renderPositionList();
   if (!editingPosting) postWorkplace.value = workplaceForTeam(currentTeam()); // 팀마다 다른 기본 근무지
   updateWorkplaceHint();
@@ -1737,6 +1740,15 @@ saveDefaultsBtn.addEventListener('click', async () => {
 
 const postNotice = document.getElementById('postNotice');
 const noticeStatus = document.getElementById('noticeStatus');
+let noticeEditing = false;
+function setNoticeEditing(on) {
+  noticeEditing = on;
+  postNotice.readOnly = !on;
+  document.getElementById('editNoticeBtn').hidden = on;
+  document.getElementById('saveNoticeBtn').hidden = !on;
+  document.getElementById('cancelNoticeBtn').hidden = !on;
+  document.getElementById('resetNoticeBtn').hidden = !on;
+}
 async function putNotice(text, okMsg) {
   try {
     const res = await fetch('/api/posting-defaults', {
@@ -1746,15 +1758,67 @@ async function putNotice(text, okMsg) {
     if (!res.ok) throw new Error(data.error || '저장 실패');
     postingDefaults.commonNotice = data.commonNotice;
     postNotice.value = data.commonNotice;
+    setNoticeEditing(false);
     noticeStatus.textContent = okMsg; noticeStatus.className = 'status ok';
   } catch (err) {
     noticeStatus.textContent = err.message || '저장 중 오류가 발생했어요.'; noticeStatus.className = 'status err';
   }
 }
-document.getElementById('saveNoticeBtn').addEventListener('click', () => putNotice(postNotice.value, '공통 안내를 저장했어요. 다음에 만드는 AI 초안부터 맨 끝에 붙어요.'));
+document.getElementById('editNoticeBtn').addEventListener('click', () => { setNoticeEditing(true); noticeStatus.textContent = ''; postNotice.focus(); });
+document.getElementById('cancelNoticeBtn').addEventListener('click', () => {
+  if (postNotice.value !== postingDefaults.commonNotice && !confirm('고친 내용을 저장하지 않고 닫을까요?')) return;
+  postNotice.value = postingDefaults.commonNotice; setNoticeEditing(false); noticeStatus.textContent = '';
+});
+document.getElementById('saveNoticeBtn').addEventListener('click', () => putNotice(postNotice.value, '공고 안내를 저장했어요. 다음에 만드는 AI 초안부터 맨 끝에 붙어요.'));
 document.getElementById('resetNoticeBtn').addEventListener('click', () => {
-  if (!confirm('공통 안내를 처음 문구(오픈한 채용 공고 기준)로 되돌릴까요?\n직접 고친 내용은 사라져요.')) return;
+  if (!confirm('공고 안내를 처음 문구(오픈한 채용 공고 기준)로 되돌릴까요?\n직접 고친 내용은 사라져요.')) return;
   putNotice(postingDefaults.defaultCommonNotice, '처음 문구로 되돌렸어요.');
+});
+
+// ---------- 팀이 맡은 브랜드 (평소엔 잠금, 수정 → 저장) ----------
+const brandBody = document.getElementById('brandBody');
+const brandStatus = document.getElementById('brandStatus');
+let teamBrands = {};
+let brandEditing = false;
+function setBrandStatus(msg, cls) { brandStatus.textContent = msg || ''; brandStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+function renderBrands() {
+  brandBody.innerHTML = postTeams.map(t => `<tr><td data-label="팀"><strong>${escapeHtml(t)}</strong></td><td data-label="맡은 브랜드"><input type="text" class="brand-input" data-team="${escapeHtml(t)}" maxlength="100" value="${escapeHtml(teamBrands[t] || '')}" placeholder="${brandEditing ? '예: 인디비주엘, 우일신' : '(아직 입력 안 함)'}" ${brandEditing ? '' : 'readonly'} aria-label="${escapeHtml(t)}이 맡은 브랜드" /></td></tr>`).join('');
+  document.getElementById('editBrandBtn').hidden = brandEditing;
+  document.getElementById('saveBrandBtn').hidden = !brandEditing;
+  document.getElementById('cancelBrandBtn').hidden = !brandEditing;
+}
+function updateTeamBrandHint() {
+  const el = document.getElementById('postTeamBrand');
+  const t = currentTeam();
+  const b = t ? (teamBrands[t] || '').trim() : '';
+  el.hidden = !b;
+  el.textContent = b ? `${t}이 맡은 브랜드: ${b} (AI 공고 초안이 참고해요)` : '';
+}
+async function loadBrands() {
+  try {
+    const res = await fetch('/api/team-brands');
+    const data = await res.json();
+    if (!res.ok || !data.brands) throw new Error(data.error || '불러오기 실패');
+    teamBrands = data.brands;
+    renderBrands(); updateTeamBrandHint();
+  } catch (err) { setBrandStatus('팀별 브랜드를 불러오지 못했어요: ' + (err.message || ''), 'err'); }
+}
+document.getElementById('editBrandBtn').addEventListener('click', () => { brandEditing = true; setBrandStatus(''); renderBrands(); const f = brandBody.querySelector('input'); if (f) f.focus(); });
+document.getElementById('cancelBrandBtn').addEventListener('click', () => {
+  const dirty = [...brandBody.querySelectorAll('.brand-input')].some(i => i.value.trim() !== (teamBrands[i.dataset.team] || '').trim());
+  if (dirty && !confirm('고친 내용을 저장하지 않고 닫을까요?')) return;
+  brandEditing = false; renderBrands(); setBrandStatus('');
+});
+document.getElementById('saveBrandBtn').addEventListener('click', async () => {
+  const brands = {};
+  brandBody.querySelectorAll('.brand-input').forEach(i => { brands[i.dataset.team] = i.value.trim(); });
+  try {
+    const res = await fetch('/api/team-brands', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brands }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '저장 실패');
+    teamBrands = data.brands; brandEditing = false; renderBrands(); updateTeamBrandHint();
+    setBrandStatus('팀별 브랜드를 저장했어요. 다음에 만드는 AI 공고 초안부터 참고해요.', 'ok');
+  } catch (err) { setBrandStatus(err.message || '저장 중 오류가 발생했어요.', 'err'); }
 });
 
 document.getElementById('saveTeamWorkplaceBtn').addEventListener('click', async () => {
