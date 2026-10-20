@@ -1338,6 +1338,7 @@ populateDateSelects(schYearInput, schMonthInput, schDayInput);
 // (초기 데이터 로딩은 아래 bootApp()에서 로그인/권한을 확인한 뒤에 합니다)
 
 // ---------- 이력서 검토 ----------
+let criteriaEditing = false;   // 사명·인재상을 수정 중인지
 let criteriaState = null;      // { companyIntro, idealProfile, rubric: [...] }
 let lastScreening = null;      // 마지막 AI 평가 결과 (총점 재계산에 사용)
 
@@ -1358,10 +1359,55 @@ function renderRubricTable() {
 
 // 사명·인재상: 보기만 해요. (서버의 수정 기능은 남겨 두었고, 필요하면 나중에 따로 화면을 붙일 수 있어요)
 function renderCriteria() {
-  companyIntroInput.value = criteriaState.companyIntro || '';
-  idealProfileInput.value = criteriaState.idealProfile || '';
+  if (!criteriaEditing) {   // 수정 중에 새로고침(다른 탭 갔다 오기 등)이 일어나도 쓰던 글을 덮어쓰지 않음
+    companyIntroInput.value = criteriaState.companyIntro || '';
+    idealProfileInput.value = criteriaState.idealProfile || '';
+  }
   renderRubricTable();
 }
+function criteriaHasUnsaved() {
+  return criteriaEditing && criteriaState && (companyIntroInput.value !== (criteriaState.companyIntro || '') || idealProfileInput.value !== (criteriaState.idealProfile || ''));
+}
+function setCriteriaEditing(on) {
+  criteriaEditing = on;
+  companyIntroInput.readOnly = !on;
+  idealProfileInput.readOnly = !on;
+  document.getElementById('editCriteriaBtn').hidden = on;
+  document.getElementById('saveCriteriaBtn').hidden = !on;
+  document.getElementById('cancelCriteriaBtn').hidden = !on;
+  document.getElementById('resetCriteriaBtn').hidden = !on;
+  if (on) { document.getElementById('companyBox').open = true; document.getElementById('idealBox').open = true; }
+}
+document.getElementById('editCriteriaBtn').addEventListener('click', () => { criteriaStatus.textContent = ''; setCriteriaEditing(true); companyIntroInput.focus(); });
+document.getElementById('cancelCriteriaBtn').addEventListener('click', () => {
+  if (criteriaHasUnsaved() && !confirm('고친 내용을 저장하지 않고 닫을까요?')) return;
+  setCriteriaEditing(false); renderCriteria(); criteriaStatus.textContent = '';
+});
+document.getElementById('saveCriteriaBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('saveCriteriaBtn'); btn.disabled = true;
+  try {
+    const res = await fetch('/api/criteria', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyIntro: companyIntroInput.value, idealProfile: idealProfileInput.value }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '저장 실패');
+    criteriaState = { ...criteriaState, companyIntro: data.companyIntro, idealProfile: data.idealProfile };
+    setCriteriaEditing(false); renderCriteria();
+    criteriaStatus.textContent = '저장했어요. 다음 AI 공고 초안과 이력서 평가부터 반영돼요.'; criteriaStatus.className = 'status ok';
+  } catch (err) {
+    criteriaStatus.textContent = err.message || '저장 중 오류가 발생했어요.'; criteriaStatus.className = 'status err';
+  } finally { btn.disabled = false; }
+});
+document.getElementById('resetCriteriaBtn').addEventListener('click', async () => {
+  if (!confirm('사명·인재상을 처음 내용(노션 「사명, 비전, 인재상」 기준)으로 되돌릴까요?\n직접 고친 내용은 사라져요. 공고는 그대로예요.')) return;
+  try {
+    const res = await fetch('/api/criteria/reset', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '되돌리기 실패');
+    criteriaState = { ...criteriaState, companyIntro: data.companyIntro, idealProfile: data.idealProfile };
+    setCriteriaEditing(false); renderCriteria();
+    criteriaStatus.textContent = '처음 내용으로 되돌렸어요.'; criteriaStatus.className = 'status ok';
+  } catch (err) { criteriaStatus.textContent = err.message || '되돌리는 중 오류가 발생했어요.'; criteriaStatus.className = 'status err'; }
+});
+
 async function loadCriteria() {
   try {
     const res = await fetch('/api/criteria');
@@ -2277,6 +2323,7 @@ screenResumeBtn.addEventListener('click', async () => {
     resumeStatus.className = 'status err';
     return;
   }
+  if (criteriaHasUnsaved() && !confirm('사명·인재상을 고치는 중이에요.\n저장하지 않은 수정은 평가에 쓰이지 않아요. 저장된 내용으로 평가할까요?\n\n[취소]를 누르고 먼저 "저장"하셔도 돼요.')) return;
 
   screenResumeBtn.disabled = true;
   screenResumeBtn.textContent = '평가 중... (최대 1분)';
@@ -3108,6 +3155,7 @@ let apCursor = '';
 let apOptions = null;    // 노션의 선택지(면접상태·문자 안내·팀)
 let apLoadedAt = 0;
 let apLoading = false;
+let apScheduleChecked = false;   // 면접 일정과 비교한 결과를 받았는지(일정 보기 권한이 없으면 false)
 const AP_ACTIVE = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정'];   // 면접 문자·일정을 이어서 할 단계
 const canEdit_ = menu => (typeof canEdit === 'function') && canEdit(menu);
 const AP_REC = { PASS: ['추천', 'pass'], BORDERLINE: ['보류', 'border'], REJECT: ['비추천', 'reject'] };
@@ -3130,6 +3178,29 @@ function apFmtWhen(v) {
 }
 function apCanEdit() { return !document.body.classList.contains('no-edit-resume'); }
 
+// 문자 보내기의 면접 일정과 비교한 상태 배지 + 맞추기 버튼
+const AP_SCH_LABEL = { match: ['✓ 일정과 일치', 'ok'], diff: ['⚠ 일정과 달라요', 'warn'], notion_only: ['일정에 없어요', 'muted'], schedule_only: ['노션에 없어요', 'warn'], date_only: ['날짜만 일치', 'muted'] };
+// 연락처가 달라 짝짓지 못한 같은 이름의 일정(동명이인이거나 연락처가 바뀐 같은 사람일 수 있음)을 이름 칸 아래에 알려줌
+function apAmbiguousNote(x) {
+  const amb = (apScheduleChecked && x.scheduleCheck && x.scheduleCheck.ambiguous) || [];
+  if (!amb.length) return '';
+  const list = amb.map(s => `${s.team} ${s.round || ''} ${apFmtWhen(s.at)}`.replace(/\s+/g, ' ').trim()).join(', ');
+  return `<span class="ap-sch ap-sch-warn" title="이름은 같은데 연락처가 달라서 같은 사람인지 알 수 없어요. 문자 보내기의 면접 일정에서 확인하세요.">연락처가 다른 일정 ${amb.length}건: ${escapeHtml(list)}</span>`;
+}
+function apSchedBadge(x, round) {
+  if (!apScheduleChecked || !x.scheduleCheck) return '';
+  const r = (x.scheduleCheck.rows || []).find(v => v.round === round);
+  if (!r) return '';
+  const [label, cls] = AP_SCH_LABEL[r.state] || ['', 'muted'];
+  const detail = r.state === 'diff' ? ` · 일정 ${apFmtWhen(r.scheduleAt)}` : (r.state === 'schedule_only' || r.state === 'date_only' ? ` · 일정 ${apFmtWhen(r.scheduleAt)}` : '');
+  const warnPhone = x.scheduleCheck.how === 'nameTeam' ? ' <span class="ap-sch-warn" title="연락처가 달라요. 같은 사람이 맞는지 확인하세요">(연락처 다름)</span>' : '';
+  const fixes = [];
+  if (r.state === 'diff' || r.state === 'date_only') {
+    if (canEdit_('schedule') && r.scheduleId) fixes.push(`<button type="button" class="link-btn ap-sch-fix" data-dir="toSchedule" data-round="${round}">노션 → 일정</button>`);
+    if (apCanEdit() && r.scheduleAt) fixes.push(`<button type="button" class="link-btn ap-sch-fix" data-dir="toNotion" data-round="${round}">일정 → 노션</button>`);
+  } else if (r.state === 'schedule_only' && apCanEdit()) fixes.push(`<button type="button" class="link-btn ap-sch-fix" data-dir="toNotion" data-round="${round}">일정 → 노션</button>`);
+  return `<span class="ap-sch ap-sch-${cls}" data-round="${round}">${label}${escapeHtml(detail)}${warnPhone}</span>${fixes.length ? `<span class="ap-sch-actions">${fixes.join(' ')}</span>` : ''}`;
+}
 function apRowHtml(x) {
   const rec = AP_REC[x.recommendation];
   const canEdit = apCanEdit();
@@ -3138,11 +3209,11 @@ function apRowHtml(x) {
     ? `<select class="ap-status" data-id="${escapeHtml(x.id)}" aria-label="면접상태">${(statuses.includes(x.status) || !x.status ? '' : `<option value="${escapeHtml(x.status)}">${escapeHtml(x.status)}</option>`)}<option value=""${x.status ? '' : ' selected'}>(없음)</option>${statuses.map(s => `<option value="${escapeHtml(s)}"${s === x.status ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>`
     : escapeHtml(x.status || '-');
   return `<tr class="ap-row" data-id="${escapeHtml(x.id)}">
-    <td data-label="이름"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong>${x.phone ? `<span class="ap-sub">${escapeHtml(x.phone)}</span>` : ''}</td>
+    <td data-label="이름"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong>${x.phone ? `<span class="ap-sub">${escapeHtml(x.phone)}</span>` : ''}${apAmbiguousNote(x)}</td>
     <td data-label="팀 · 직무">${escapeHtml(x.team || '-')}${x.job ? `<span class="ap-sub">${escapeHtml(x.job)}</span>` : ''}</td>
     <td data-label="면접상태">${statusCell}${x.smsStatus ? `<span class="ap-sub">문자: ${escapeHtml(x.smsStatus)}</span>` : ''}</td>
-    <td data-label="1차 면접">${escapeHtml(apFmtWhen(x.interview1))}</td>
-    <td data-label="2차 면접">${escapeHtml(apFmtWhen(x.interview2))}</td>
+    <td data-label="1차 면접">${escapeHtml(apFmtWhen(x.interview1))}${apSchedBadge(x, '1차')}</td>
+    <td data-label="2차 면접">${escapeHtml(apFmtWhen(x.interview2))}${apSchedBadge(x, '2차')}</td>
     <td data-label="점수 · 추천">${x.score === null || x.score === undefined ? '-' : escapeHtml(String(x.score))}${rec ? ` <span class="ap-rec ${rec[1]}">${rec[0]}</span>` : ''}</td>
     <td data-label="">${canEdit ? '<button type="button" class="link-btn ap-edit-btn">수정</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('send') ? '<button type="button" class="add-btn ap-sms-btn">📨 면접 문자</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('schedule') ? '<button type="button" class="link-btn ap-sch-btn">📅 일정</button> ' : ''}<a class="link-btn" href="${escapeHtml(x.url || '#')}" target="_blank" rel="noopener">노션</a></td>
   </tr>`;
@@ -3196,7 +3267,9 @@ async function loadApplicants(reset) {
     const qs = new URLSearchParams({ status: apStatus.value || 'active', team: apTeam.value || '', q: apSearch.value.trim(), pageSize: '50' });
     if (!reset && apCursor) qs.set('cursor', apCursor);
     setApMsg('노션에서 불러오는 중...');
+    qs.set('schedule', '1');   // 문자 보내기의 면접 일정과 짝지은 결과도 같이 받음
     const data = await apFetch('/api/notion/applicants?' + qs.toString());
+    apScheduleChecked = data.scheduleChecked === true;
     apList = reset ? data.applicants : apList.concat(data.applicants);
     apCursor = data.nextCursor || '';
     apLoadedAt = Date.now();
@@ -3208,7 +3281,19 @@ async function loadApplicants(reset) {
 }
 function apReplace(applicant) {
   const i = apList.findIndex(x => x.id === applicant.id);
-  if (i >= 0) apList[i] = applicant;
+  if (i >= 0) apList[i] = { ...applicant, scheduleCheck: applicant.scheduleCheck || apList[i].scheduleCheck };
+}
+// 노션을 저장한 뒤에는 그 사람의 일정 비교를 다시 계산해서 줄을 갱신
+async function apRefreshSchedule(id) {
+  if (!apScheduleChecked) return;
+  const x = apList.find(v => v.id === id);
+  if (!x) return;
+  try {
+    const qs = new URLSearchParams({ status: 'all', q: x.name || '', pageSize: '100', schedule: '1' });
+    const data = await apFetch('/api/notion/applicants?' + qs.toString());
+    const fresh = data.applicants.find(v => v.id === id);
+    if (fresh) { const i = apList.findIndex(v => v.id === id); apList[i] = fresh; }
+  } catch { /* 일정 비교를 못 새로 읽어도 저장은 이미 끝났으니 조용히 넘어감 */ }
 }
 async function apSave(id, body, msgEl) {
   const x = apList.find(v => v.id === id);
@@ -3218,9 +3303,10 @@ async function apSave(id, body, msgEl) {
       body: JSON.stringify({ ...body, expectedEditedAt: x ? x.editedAt : '' }),
     });
     apReplace(data.applicant);
-    return data.applicant;
+    await apRefreshSchedule(id);   // 노션 값이 바뀌었으니 문자 보내기의 면접 일정과 맞는지 다시 계산(상태 변경·면접 확정·맞추기 모두 여기를 지나요)
+    return apList.find(v => v.id === id) || data.applicant;
   } catch (err) {
-    if (err.status === 409 && err.data && err.data.applicant) apReplace(err.data.applicant);
+    if (err.status === 409 && err.data && err.data.applicant) { apReplace(err.data.applicant); await apRefreshSchedule(id); }
     throw err;
   }
 }
@@ -3301,6 +3387,40 @@ apBody.addEventListener('click', async e => {
       if (err.status === 409) { apRender(); setApMsg(err.message, 'err'); }
     }
   }
+});
+// 일정 ↔ 노션 맞추기: 어느 쪽으로 맞출지 사람이 고르고, 양쪽 값을 보여주는 확인창을 거침
+apBody.addEventListener('click', async e => {
+  const btn = e.target.closest('.ap-sch-fix');
+  if (!btn) return;
+  const tr = btn.closest('tr'); const id = tr.dataset.id;
+  const x = apList.find(v => v.id === id);
+  if (!x || !x.scheduleCheck) return;
+  const round = btn.dataset.round; const dir = btn.dataset.dir;
+  const r = (x.scheduleCheck.rows || []).find(v => v.round === round);
+  if (!r) return;
+  const who = x.name || '이 지원자';
+  const warn = x.scheduleCheck.how === 'nameTeam' ? '\n(주의: 연락처가 달라서 이름과 팀만 보고 짝지은 일정이에요. 같은 사람이 맞는지 먼저 확인하세요.)' : '';
+  btn.disabled = true;
+  try {
+    if (dir === 'toSchedule') {
+      if (r.notionAt.length < 16) { setApMsg('노션에 시간이 없어서(날짜만 있어요) 일정의 시간을 바꿀 수 없어요. 노션에 시간을 먼저 입력하세요.', 'err'); return; }   // 바꿀 수 없으면 확인창을 띄우기 전에 알림
+      if (!confirm(`${who} 님의 ${round} 면접 일정을 노션에 맞춰 바꿀까요?\n일정(문자 보내기) ${apFmtWhen(r.scheduleAt)} → ${apFmtWhen(r.notionAt)}\n일정의 변경 이력에 기록돼요.${warn}`)) return;
+      const res = await fetch(`/api/schedules/${encodeURIComponent(r.scheduleId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interviewAt: r.notionAt, reason: '지원자 관리에서 노션 일시에 맞춤' }) });
+      const d = await readJsonOrNull(res);
+      if (!res.ok) throw new Error((d && d.error) || '일정을 바꾸지 못했어요.');
+      await apRefreshSchedule(id); apRender(); apFlashRow(id);
+      setApMsg(`${who} 님의 ${round} 면접 일정(문자 보내기)을 ${apFmtWhen(r.notionAt)}로 맞췄어요.`, 'ok');
+    } else {
+      const body = round === '1차' ? { interview1: r.scheduleAt } : { interview2: r.scheduleAt };
+      if (!confirm(`${who} 님의 ${round} 면접일을 일정(문자 보내기)에 맞춰 노션에 바꿀까요?\n노션 ${r.notionAt ? apFmtWhen(r.notionAt) : '(없음)'} → ${apFmtWhen(r.scheduleAt)}${warn}`)) return;
+      await apSave(id, body);
+      apRender(); apFlashRow(id);
+      setApMsg(`${who} 님의 ${round} 면접일을 일정(${apFmtWhen(r.scheduleAt)})에 맞춰 노션에 저장했어요.`, 'ok');
+    }
+  } catch (err) {
+    if (err.status === 409) { apRender(); }
+    setApMsg(err.message || '맞추지 못했어요.', 'err');
+  } finally { btn.disabled = false; }
 });
 document.getElementById('apRefresh').addEventListener('click', () => loadApplicants(true));
 apStatus.addEventListener('change', () => loadApplicants(true));

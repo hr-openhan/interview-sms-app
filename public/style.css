@@ -1764,3 +1764,22 @@ body.has-dock .wrap { padding-bottom: 90px; }
 /* 팀이 맡은 브랜드 */
 .brand-table input { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; }
 .brand-table input[readonly], #postNotice[readonly] { background: #f4f1e9; color: var(--ink, #2b2a26); cursor: default; }
+
+/* 회사 소개·공통 인재상: 접이식 상자 (평가표 보기와 같은 모양), 평소엔 잠금 */
+#companyBox, #idealBox { margin-top: 10px; }
+#companyIntroInput[readonly], #idealProfileInput[readonly] { background: #f4f1e9; cursor: default; }
+#companyBox textarea, #idealBox textarea { width: 100%; box-sizing: border-box; }
+#criteriaActions { margin-top: 12px; }
+
+/* 지원자 관리: 문자 보내기의 면접 일정과 맞는지 보여주는 배지·맞추기 버튼 */
+.ap-sch { display: block; margin-top: 3px; padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 1.5; width: fit-content; max-width: 100%; box-sizing: border-box; }
+.ap-sch-ok { background: #e8f2e6; color: #2f6b34; }
+.ap-sch-warn { background: #fdf0e0; color: #9a5b12; }
+.ap-sch-muted { background: #f1ede4; color: var(--muted, #6b6558); }
+.ap-sch-warn[title] { text-decoration: underline dotted; }
+.ap-sch-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
+.ap-sch-actions .link-btn { font-size: 11px; padding: 0; }
+
+/* 일정 배지가 좁은 칸에서 둥근 알약 모양 때문에 어색하게 꺾이지 않게: 여러 줄이면 모서리만 살짝 둥글게 */
+.ap-sch { border-radius: 8px; white-space: normal; overflow-wrap: anywhere; }
+td[data-label="이름"] .ap-sch { margin-top: 4px; font-size: 11px; }
