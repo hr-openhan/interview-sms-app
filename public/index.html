@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" data-app-version="2026.10.21-2">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -281,18 +281,28 @@
         <div class="preview-head">
           <span class="preview-label">회사 정보 (사명 · 비전 / 공통 인재상)</span>
         </div>
-        <p class="manage-hint">공고 AI 초안과 이력서 평가가 참고해요. 여기서는 <strong>보기만</strong> 할 수 있어요.</p>
-        <div class="field">
-          <label for="companyIntroInput">회사 소개 (사명 · 비전)</label>
-          <textarea id="companyIntroInput" rows="6" readonly></textarea>
-        </div>
-        <div class="field">
-          <label for="idealProfileInput">공통 인재상</label>
-          <textarea id="idealProfileInput" rows="8" readonly></textarea>
+        <p class="manage-hint">공고 AI 초안과 이력서 평가가 참고해요. 아래 상자를 눌러 펼쳐 보세요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요.</p>
+        <details id="companyBox" class="rubric-box">
+          <summary>회사 소개 (사명 · 비전) 보기·수정</summary>
+          <div class="field">
+            <textarea id="companyIntroInput" rows="8" readonly aria-label="회사 소개 (사명 · 비전)"></textarea>
+          </div>
+        </details>
+        <details id="idealBox" class="rubric-box">
+          <summary>공통 인재상 보기·수정</summary>
+          <div class="field">
+            <textarea id="idealProfileInput" rows="12" readonly aria-label="공통 인재상"></textarea>
+          </div>
+        </details>
+        <div class="posting-actions" id="criteriaActions">
+          <button id="editCriteriaBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
+          <button id="saveCriteriaBtn" class="add-btn" type="button" hidden>저장</button>
+          <button id="cancelCriteriaBtn" class="link-btn" type="button" hidden>취소</button>
+          <button id="resetCriteriaBtn" class="link-btn" type="button" hidden>처음 내용으로 되돌리기</button>
         </div>
         <p class="status" id="criteriaStatus"></p>
 
-        <details class="rubric-box">
+        <details id="rubricBox" class="rubric-box">
           <summary>평가표 보기 (총 100점 · 경력직 / 신입직)</summary>
           <p class="manage-hint">공고의 <strong>채용 유형</strong>에 따라 평가표가 달라져요. 항목마다 S/A/B/C 기준을 두고, 그 사이 점수도 줄 수 있어요. 재직 여부·입사 가능 시기, 통근·거주지, 희망 연봉은 <strong>점수가 아니라 "면접에서 확인할 것"</strong>으로만 보여줘요.</p>
           <p class="manage-hint" style="margin-bottom:2px"><strong>경력직</strong> (기본)</p>
@@ -364,7 +374,8 @@
             <span id="resumeTotal"></span><span class="resume-score-max">/100</span>
             <span class="resume-ai-total" id="resumeAiTotal"></span>
           </div>
-          <p class="manage-hint">점수는 AI가 매긴 1차 평가로, <strong>검토 우선순위를 잡는 참고</strong>예요. 학력·전공 점수도 총점에 들어가지만 <strong>추천은 학력을 뺀 점수로만</strong> 정하고, 점수가 낮아도 탈락으로 표시하지 않아요(탈락 여부는 사람이 정해요). 점수 칸을 직접 고치면 총점은 바로 다시 계산되지만 추천은 다시 계산되지 않아요.</p>
+          <p class="manage-hint">점수는 검토를 돕는 <strong>참고</strong>예요. 합격·탈락은 <strong>사람이</strong> 정해요.</p>
+        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">점수는 AI가 매긴 1차 평가로, <strong>검토 우선순위를 잡는 참고</strong>예요. 학력·전공 점수도 총점에 들어가지만 <strong>추천은 학력을 뺀 점수로만</strong> 정하고, 점수가 낮아도 탈락으로 표시하지 않아요(탈락 여부는 사람이 정해요). 점수 칸을 직접 고치면 총점은 바로 다시 계산되지만 추천은 다시 계산되지 않아요.</p></details>
           <table class="history-table stack-table score-table">
             <thead>
               <tr><th>평가 영역</th><th>배점</th><th>점수 (수정 가능)</th><th>AI 평가 근거</th></tr>
@@ -458,7 +469,8 @@
 
       <section class="panel" id="batchSection" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
         <h2>여러 이력서 한꺼번에 점수 보기</h2>
-        <p class="manage-hint">위 "평가할 공고"를 고른 뒤 PDF 이력서를 여러 개 올리면(최대 20개, 파일당 4MB 이하) <strong>점수만 표로 보여줘요.</strong> 노션 페이지는 <strong>자동으로 만들지 않아요.</strong> 서류 합격시킬 사람은 줄 끝의 <strong>"서류 합격 확정"</strong> 버튼을 직접 눌러주세요. 확정하면 노션에 지원자 카드가 만들어지고, 이어서 면접 문자·일정 등록으로 넘어갈 수 있어요. 점수는 검토 순서를 정하는 참고이고, 합격·탈락은 사람이 정해요. 평가 결과는 저장되지 않아서 화면을 닫으면 사라져요(노션에 등록한 사람만 남아요).</p>
+        <p class="manage-hint">PDF 이력서를 여러 개 올리면 <strong>점수만</strong> 보여줘요. 노션 등록은 줄마다 <strong>직접</strong> 눌러요.</p>
+        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">위 "평가할 공고"를 고른 뒤 PDF 이력서를 여러 개 올리면(최대 20개, 파일당 4MB 이하) <strong>점수만 표로 보여줘요.</strong> 노션 페이지는 <strong>자동으로 만들지 않아요.</strong> 서류 합격시킬 사람은 줄 끝의 <strong>"서류 합격 확정"</strong> 버튼을 직접 눌러주세요. 확정하면 노션에 지원자 카드가 만들어지고, 이어서 면접 문자·일정 등록으로 넘어갈 수 있어요. 점수는 검토 순서를 정하는 참고이고, 합격·탈락은 사람이 정해요. 평가 결과는 저장되지 않아서 화면을 닫으면 사라져요(노션에 등록한 사람만 남아요).</p></details>
         <div class="field"><input id="batchFiles" type="file" accept="application/pdf,.pdf" multiple aria-label="이력서 PDF 여러 개 고르기" /></div>
         <p class="manage-hint" id="batchFileInfo"></p>
         <label class="check-chip" style="margin-bottom:8px"><input id="batchUsePeers" type="checkbox" checked /> 노션의 이전 서류 합격자를 참고해서 평가 (지원직무·전공·주요경력만 보내요)</label>
@@ -485,7 +497,8 @@
         <p class="manage-hint">① 팀 → ② 포지션 → ③ 근무 조건 순서로 입력하고 공고문을 만들어요. <strong>확정한 공고</strong>가 <strong>이력서 검토</strong> 탭에서 평가의 기준이 돼요. (AI 초안은 이력서 검토 탭에 있는 회사 소개·공통 인재상을 참고해요)</p>
         <details id="importBox" class="rubric-box">
           <summary>기존 공고에서 가져오기 (사람인 등에 올린 공고 → 팀·포지션별로 골라 저장)</summary>
-          <p class="manage-hint">이미 올린 공고 글을 붙여넣으면 팀·포지션별로 나눠 줘요. 저장할 것만 골라 저장하면 <b>공고 데이터가 되고, 확정한 공고는 이력서 채점의 기준</b>이 돼요. 회사 소개·복지·전형 절차 같은 공통 내용은 빼고, 근무지(강남, SCM팀·와우서비스팀은 남양주)·수습 3개월·급여(면접 후 협상)는 기본값으로 채워요.</p>
+          <p class="manage-hint">이미 올린 공고 글을 붙여넣어 팀·포지션별로 나눠 저장해요.</p>
+        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">이미 올린 공고 글을 붙여넣으면 팀·포지션별로 나눠 줘요. 저장할 것만 골라 저장하면 <b>공고 데이터가 되고, 확정한 공고는 이력서 채점의 기준</b>이 돼요. 회사 소개·복지·전형 절차 같은 공통 내용은 빼고, 근무지(강남, SCM팀·와우서비스팀은 남양주)·수습 3개월·급여(면접 후 협상)는 기본값으로 채워요.</p></details>
           <div class="field"><textarea id="importText" rows="8" maxlength="60000" placeholder="사람인·잡코리아 공고 글을 여기에 붙여넣으세요"></textarea></div>
           <div class="posting-actions">
             <button id="importSplitBtn" class="add-btn" type="button">✨ 팀·포지션별로 나누기 (AI)</button>
@@ -579,6 +592,15 @@
           <label for="postJd">공고문 (초안을 읽고 필요하면 고쳐주세요)</label>
           <textarea id="postJd" rows="22"></textarea>
         </div>
+        <div id="postCheckBox" class="post-check" aria-live="polite">
+          <div class="post-check-head">
+            <strong>공고 점검</strong>
+            <span id="postCheckSummary" class="post-check-summary">공고문을 쓰면 자동으로 점검해요</span>
+            <button id="postCheckBtn" class="link-btn" type="button">지금 점검</button>
+          </div>
+          <ul id="postCheckList" class="post-check-list"></ul>
+          <p class="manage-hint post-check-note">놓치기 쉬운 표현을 미리 걸러주는 점검이에요. 법률 자문은 아니고, 판단은 담당자가 해요.</p>
+        </div>
         <p id="postEditing" class="manage-hint" hidden></p>
         <div class="posting-actions">
           <button id="confirmPostingBtn" class="add-btn" type="button">✅ 공고 확정</button>
@@ -595,7 +617,8 @@
         <p class="manage-hint">공고를 만들 때 쓰는 기본 정보예요. <strong>보기</strong> 권한이면 읽을 수 있고, <strong>수정</strong> 권한이 있을 때만 "수정" 버튼이 보여요.</p>
         <details id="brandBox" class="rubric-box">
           <summary>팀과 맡은 브랜드 보기·수정</summary>
-          <p class="manage-hint">공고의 팀은 문자 보내기·면접 일정과 <strong>같은 팀 목록</strong>이에요(팀 이름은 바꿀 수 없어요). 포지션(MD·포토 등)은 위에서 직접 입력해요. 인디비주엘·우일신처럼 <strong>팀이 맡은 브랜드</strong>는 아래에 적어두면 AI 공고 초안이 참고해요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요.</p>
+          <p class="manage-hint">팀은 문자 보내기와 같은 목록이에요. 팀이 맡은 브랜드는 <strong>수정 → 저장</strong>으로 적어요.</p>
+        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">공고의 팀은 문자 보내기·면접 일정과 <strong>같은 팀 목록</strong>이에요(팀 이름은 바꿀 수 없어요). 포지션(MD·포토 등)은 위에서 직접 입력해요. 인디비주엘·우일신처럼 <strong>팀이 맡은 브랜드</strong>는 아래에 적어두면 AI 공고 초안이 참고해요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요.</p></details>
           <table class="history-table stack-table brand-table">
             <thead><tr><th>팀</th><th>맡은 브랜드</th></tr></thead>
             <tbody id="brandBody"></tbody>

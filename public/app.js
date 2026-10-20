@@ -1,3 +1,60 @@
+// 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
+const APP_VERSION = '2026.10.21-2';
+
+// ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
+// 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
+(function versionGuard() {
+  function banner(html) {
+    if (document.getElementById('versionBanner')) return;
+    const el = document.createElement('div');
+    el.id = 'versionBanner';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:sticky;top:0;z-index:9999;background:#fdecea;color:#7a1f14;border-bottom:2px solid #c0584a;padding:10px 14px;font-size:14px;line-height:1.5';
+    el.innerHTML = html;
+    (document.body || document.documentElement).prepend(el);
+  }
+  function check() {
+    fetch('/api/me', { cache: 'no-store' }).then(r => r.json()).then(me => {
+      if (!me || !me.version) { banner('<strong>서버와 화면 파일의 버전이 달라요.</strong> 서버가 버전 정보를 주지 않아요. 서버(server.js)가 예전 파일일 수 있어요. 데이터는 지워진 게 아니라 화면이 못 읽는 것일 수 있어요. 새 파일 전체(server.js, public 폴더 전체)를 같은 버전으로 올린 뒤 다시 배포하고, 브라우저를 새로고침(Ctrl+Shift+R)해주세요.'); return; }
+      if (me.version !== APP_VERSION) banner(`<strong>서버와 화면 파일의 버전이 달라요.</strong> (서버 ${me.version} / 화면 ${APP_VERSION}) 일부 파일만 새것이라 일부 화면이 멈추거나 데이터가 비어 보일 수 있어요. <u>데이터는 지워진 게 아니에요.</u> 새 파일 전체(server.js, public 폴더 전체)를 같은 버전으로 올린 뒤 다시 배포하고, 브라우저를 새로고침(Ctrl+Shift+R)해주세요.`);
+    }).catch(() => { /* 서버에 못 닿으면 다른 오류 안내가 따로 나와요 */ });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check); else check();
+})();
+// ---------- 시작 예약 (이 블록도 파일 맨 앞에서 실행돼요) ----------
+// bootApp()은 발송 이력·면접 일정·양식 같은 핵심 데이터를 불러와요. 두 가지를 동시에 지켜야 해서 "예약"으로 시작해요:
+//  (a) 아래 모든 상수·함수가 선언된 뒤에 시작해야 안전하고(그래서 스크립트 실행이 끝난 뒤인 load 시점),
+//  (b) 아래 어딘가 한 줄이 오류를 내서 스크립트가 중간에 멈춰도 시작은 반드시 되어야 해요(예약은 이미 맨 앞에서 해뒀어요).
+window.__appScriptCompleted = false;
+window.addEventListener('load', function startApp() {
+  // 함수 선언(bootApp)은 스크립트가 중간에 멈춰도 이미 만들어져 있어서, "정의됐나"로는 중단을 알 수 없어요.
+  // 그래서 파일 맨 끝에서 켜는 __appScriptCompleted로 "끝까지 실행됐나"를 확인해요.
+  if (!window.__appScriptCompleted) {
+    document.body.classList.remove('booting');
+    if (!document.getElementById('bootFailBanner')) {
+      const el = document.createElement('div'); el.id = 'bootFailBanner'; el.setAttribute('role', 'alert');
+      el.style.cssText = 'position:sticky;top:0;z-index:9999;background:#fdecea;color:#7a1f14;border-bottom:2px solid #c0584a;padding:10px 14px;font-size:14px;line-height:1.5';
+      el.innerHTML = '<strong>화면 프로그램(app.js)이 중간에 멈췄어요.</strong> <u>저장된 데이터(발송 이력·면접 일정·양식)는 지워진 게 아니에요.</u> 보통 파일 일부만 새 버전으로 올렸을 때 생겨요. 새 파일 전체(server.js, public 폴더 전체)를 같은 버전으로 올려 다시 배포한 뒤 브라우저를 새로고침(Ctrl+Shift+R)해주세요. 계속되면 브라우저 개발자 도구(F12) 콘솔의 빨간 오류 글을 알려주세요.';
+      (document.body || document.documentElement).prepend(el);
+    }
+    return;   // 중간에 멈춘 상태에서 데이터 불러오기를 시도해도 빈 화면만 되니, 경고만 보여주고 멈춰요
+  }
+  bootApp().catch(err => { console.error('[bootApp] 시작 중 오류:', err); document.body.classList.remove('booting'); });
+});
+// 이 파일이 보는 화면(index.html)이 같은 버전인지: index.html 쪽에도 같은 버전을 적어 두고 비교해요.
+(function htmlVersionGuard() {
+  function run() {
+    const v = document.documentElement.getAttribute('data-app-version');
+    if (v !== APP_VERSION && !document.getElementById('versionBanner')) {
+      const el = document.createElement('div');
+      el.id = 'versionBanner'; el.setAttribute('role', 'alert');
+      el.style.cssText = 'position:sticky;top:0;z-index:9999;background:#fdecea;color:#7a1f14;border-bottom:2px solid #c0584a;padding:10px 14px;font-size:14px;line-height:1.5';
+      el.innerHTML = `<strong>화면 파일(index.html)과 app.js의 버전이 달라요.</strong> (index.html ${v || '버전 표시 없음'} / app.js ${APP_VERSION}) 일부 파일만 새것이라 화면이 멈추거나 데이터가 비어 보일 수 있어요. <u>데이터는 지워진 게 아니에요.</u> 새 파일 전체(server.js, public 폴더 전체)를 같은 버전으로 올린 뒤 다시 배포하고, 브라우저를 새로고침(Ctrl+Shift+R)해주세요.`;
+      (document.body || document.documentElement).prepend(el);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+})();
 // 로그인이 필요한 상태(401)가 되면 로그인 화면으로 보냅니다.
 (function () {
   const origFetch = window.fetch.bind(window);
@@ -263,7 +320,7 @@ previewResetBtn.addEventListener('click', () => {
   updatePreview();
 });
 
-async function handleSend() {
+async function handleSend(confirmLeftover) {
   if (!validate()) return;
   sendBtn.disabled = true;
   sendBtn.textContent = '발송 중...';
@@ -284,11 +341,21 @@ async function handleSend() {
         memo: memoInput.value.trim(),
         message: previewText.value, // 미리보기에 보이는 내용(수정했다면 수정된 그대로) 발송
         notionPageId: (notionCtx && notionWriteBack.checked) ? notionCtx.pageId : undefined,
+        confirmLeftover: confirmLeftover === true ? true : undefined,   // 사람이 "그래도 보내기"를 확인한 경우에만
       }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
     const data = await res.json();
+
+    // 채워지지 않은 칸(【 】·빈 날짜)이 남았다고 서버가 알려주면, 사람이 확인한 뒤에만 다시 보냄
+    if (res.status === 409 && data.code === 'leftover_confirm') {
+      const list = [...new Set((data.leftovers || []).map(x => x.text))].slice(0, 5).join(', ');
+      statusEl.textContent = ''; statusEl.className = 'status';
+      if (confirm(`문자에 채워지지 않은 칸이 남아 있어요:\n${list}\n\n지원자에게 그대로 나갈 수 있어요. 그래도 보낼까요?`)) { await handleSend(true); return; }   // 안쪽 발송이 끝날 때까지 기다려야 바깥 finally가 버튼을 먼저 풀어서 이중 발송이 되는 일이 없어요
+      statusEl.textContent = '보내지 않았어요. 칸을 채운 뒤 다시 보내주세요.'; statusEl.className = 'status err';
+      return;
+    }
 
     if (res.ok && data.success) {
       const fixNote = (data.fixes && data.fixes.length)
@@ -581,7 +648,7 @@ templateSelect.addEventListener('change', () => {
   validate();
   updatePreview();
 });
-sendBtn.addEventListener('click', handleSend);
+sendBtn.addEventListener('click', () => handleSend());
 
 // ---------- 탭 전환 ----------
 function showTab(tab) {
@@ -1362,9 +1429,17 @@ function renderCriteria() {
   if (!criteriaEditing) {   // 수정 중에 새로고침(다른 탭 갔다 오기 등)이 일어나도 쓰던 글을 덮어쓰지 않음
     companyIntroInput.value = criteriaState.companyIntro || '';
     idealProfileInput.value = criteriaState.idealProfile || '';
+    criteriaGrowAll();   // 값을 채울 때마다(처음 불러올 때·저장·되돌리기·취소) 글칸 높이를 내용에 맞춤. 접혀 있으면 상자를 펼칠 때 다시 맞춰요
   }
   renderRubricTable();
 }
+// 글칸을 내용 길이에 맞춰 늘려서 안쪽 스크롤바가 안 보이게 함 (상자를 펼칠 때·글을 고칠 때 호출)
+function autoGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = (el.scrollHeight + 2) + 'px';
+}
+function criteriaGrowAll() { autoGrow(companyIntroInput); autoGrow(idealProfileInput); }
 function criteriaHasUnsaved() {
   return criteriaEditing && criteriaState && (companyIntroInput.value !== (criteriaState.companyIntro || '') || idealProfileInput.value !== (criteriaState.idealProfile || ''));
 }
@@ -1376,8 +1451,11 @@ function setCriteriaEditing(on) {
   document.getElementById('saveCriteriaBtn').hidden = !on;
   document.getElementById('cancelCriteriaBtn').hidden = !on;
   document.getElementById('resetCriteriaBtn').hidden = !on;
-  if (on) { document.getElementById('companyBox').open = true; document.getElementById('idealBox').open = true; }
+  if (on) { document.getElementById('companyBox').open = true; document.getElementById('idealBox').open = true; setTimeout(criteriaGrowAll, 0); }
 }
+['companyBox', 'idealBox'].forEach(id => document.getElementById(id).addEventListener('toggle', e => { if (e.target.open) criteriaGrowAll(); }));
+[companyIntroInput, idealProfileInput].forEach(el => el.addEventListener('input', () => autoGrow(el)));
+window.addEventListener('resize', () => { if (document.getElementById('companyBox').open || document.getElementById('idealBox').open) criteriaGrowAll(); });
 document.getElementById('editCriteriaBtn').addEventListener('click', () => { criteriaStatus.textContent = ''; setCriteriaEditing(true); companyIntroInput.focus(); });
 document.getElementById('cancelCriteriaBtn').addEventListener('click', () => {
   if (criteriaHasUnsaved() && !confirm('고친 내용을 저장하지 않고 닫을까요?')) return;
@@ -1711,6 +1789,7 @@ postPosition.addEventListener('input', updatePositionHint);
 postPosition.addEventListener('change', updatePositionHint);
 
 function fillEditor(p) {
+  setTimeout(runPostCheck, 0);   // 불러온 공고도 바로 점검
   setTeamValue(p.team);
   renderPositionList();
   postPosition.value = p.position;
@@ -1739,6 +1818,7 @@ function resetEditor() {
   postPosition.value = '';
   postJd.value = '';
   postNotes.value = '';
+  postCheckSeq++; clearTimeout(postCheckTimer); runPostCheck();   // 새 공고에 이전 공고의 점검 결과가 남지 않게(빈 글이면 처음 안내로 돌아가요)
   variantBox.hidden = true; variantsState = []; variantEdited = false;
   applyDefaultsToForm();
   loadTeamRef();
@@ -2076,6 +2156,66 @@ document.getElementById('importSaveBtn').addEventListener('click', async () => {
   finally { btn.disabled = false; }
 });
 
+// ---------- 공고 점검 (서버의 규칙 기반 점검 결과를 보여줌 / AI를 쓰지 않아 비용이 들지 않아요) ----------
+const postCheckList = document.getElementById('postCheckList');
+const postCheckSummary = document.getElementById('postCheckSummary');
+let postCheckSeq = 0;       // 오래된 응답이 최신 결과를 덮어쓰지 않게
+let postCheckLast = null;   // 마지막 점검 결과 (확정할 때 확인에 씀)
+const PC_LABEL = { error: '수정 필요', warn: '확인 필요', info: '참고' };
+// 같은 종류(code)의 점검 결과는 한 줄로 묶어서 보여줘요(같은 말이 여러 번 나와 지저분해 보이지 않게). 위치 이동은 그 종류의 첫 번째 표현으로 가요.
+function groupFindings(list) {
+  const map = new Map();
+  for (const f of list) {
+    if (!map.has(f.code)) map.set(f.code, { ...f, items: [] });
+    if (f.start >= 0) map.get(f.code).items.push(f);
+  }
+  return [...map.values()];
+}
+function renderPostCheck(r) {
+  postCheckLast = r;
+  const c = r.count;
+  if (!r.total) { postCheckSummary.textContent = '✓ 걸리는 표현이 없어요'; postCheckSummary.className = 'post-check-summary ok'; postCheckList.innerHTML = ''; return; }
+  const groups = groupFindings(r.findings);
+  r._groups = groups;
+  const parts = [];
+  if (c.error) parts.push(`수정 필요 ${groups.filter(g => g.level === 'error').length}`);
+  if (c.warn) parts.push(`확인 필요 ${groups.filter(g => g.level === 'warn').length}`);
+  if (c.info) parts.push(`참고 ${groups.filter(g => g.level === 'info').length}`);
+  postCheckSummary.textContent = (c.error || c.warn ? '⚠ ' : 'ℹ ') + parts.join(' · ');
+  postCheckSummary.className = 'post-check-summary ' + (c.error ? 'error' : c.warn ? 'warn' : 'ok');
+  postCheckList.innerHTML = groups.map((g, gi) => {
+    const shown = g.items.slice(0, 3).map(x => `"${escapeHtml(x.match)}"`).join(', ') + (g.items.length > 3 ? ` 외 ${g.items.length - 3}곳` : '');
+    return `<li class="${g.level}"><span class="pc-level">${PC_LABEL[g.level]}</span><strong>${escapeHtml(g.title)}</strong>${g.items.length ? ` — ${shown}` : ''}${g.items.length ? ` <button type="button" class="link-btn pc-go" data-g="${gi}">위치로 이동</button>` : ''}<span class="pc-tip">${escapeHtml(g.tip)}</span></li>`;
+  }).join('') + (r.total > r.findings.length ? `<li class="info">그 밖에 ${r.total - r.findings.length}건이 더 있어요.</li>` : '');
+}
+async function runPostCheck() {
+  const seq = ++postCheckSeq;
+  const jd = postJd.value;
+  if (!jd.trim()) { postCheckLast = null; postCheckSummary.textContent = '공고문을 쓰면 자동으로 점검해요'; postCheckSummary.className = 'post-check-summary'; postCheckList.innerHTML = ''; return null; }
+  try {
+    const res = await fetch('/api/postings/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jd, applyEnd: postApplyEnd.value || '' }) });
+    const data = await readJsonOrNull(res);
+    if (seq !== postCheckSeq) return null;           // 그 사이 글이 또 바뀜: 최신 요청이 처리할 거예요
+    if (!res.ok || !data || !data.success) throw new Error((data && data.error) || '점검 실패');
+    renderPostCheck(data);
+    return data;
+  } catch (err) {
+    if (seq === postCheckSeq) { postCheckLast = null; postCheckSummary.textContent = '점검하지 못했어요: ' + (err.message || ''); postCheckSummary.className = 'post-check-summary warn'; }
+    return null;
+  }
+}
+let postCheckTimer = null;
+postJd.addEventListener('input', () => { clearTimeout(postCheckTimer); postCheckTimer = setTimeout(runPostCheck, 700); });
+postApplyEnd.addEventListener('change', runPostCheck);
+document.getElementById('postCheckBtn').addEventListener('click', runPostCheck);
+postCheckList.addEventListener('click', e => {
+  const b = e.target.closest('.pc-go'); if (!b || !postCheckLast || !postCheckLast._groups) return;
+  const g = postCheckLast._groups[Number(b.dataset.g)]; const f = g && g.items[0]; if (!f) return;
+  postJd.focus(); postJd.setSelectionRange(f.start, f.end);
+  const before = postJd.value.slice(0, f.start).split('\n').length;   // 해당 줄이 보이게 스크롤
+  postJd.scrollTop = Math.max(0, (before - 3) * 20);
+});
+
 async function savePosting(status) {
   if (!requireTeamAndPosition()) return;
   const c = collectPosting();
@@ -2109,7 +2249,20 @@ async function savePosting(status) {
     confirmPostingBtn.disabled = saveDraftBtn.disabled = false;
   }
 }
-confirmPostingBtn.addEventListener('click', () => savePosting('confirmed'));
+confirmPostingBtn.addEventListener('click', async () => {
+  clearTimeout(postCheckTimer);
+  const r = await runPostCheck();   // 확정 직전의 최신 글로 다시 점검
+  // [입력]·[추천] 표시가 남은 것은 아래 savePosting이 따로 확인하므로, 같은 경고를 두 번 묻지 않게 여기서는 뺌
+  const dup = new Set(['placeholder', 'aiTag']);
+  const need = r ? r.findings.filter(f => f.level !== 'info' && !dup.has(f.code)) : [];
+  if (need.length) {
+    const grouped = groupFindings(need);
+    const nErr = grouped.filter(f => f.level === 'error').length, nWarn = grouped.length - nErr;
+    const top = grouped.slice(0, 5).map(f => `· ${PC_LABEL[f.level]}: ${f.title}${f.items.length ? ` ("${f.items[0].match}"${f.items.length > 1 ? ` 외 ${f.items.length - 1}곳` : ''})` : ''}`).join('\n');
+    if (!confirm(`공고 점검에서 ${nErr ? `수정 필요 ${nErr}건` : ''}${nErr && nWarn ? ', ' : ''}${nWarn ? `확인 필요 ${nWarn}건` : ''}이 나왔어요.\n\n${top}\n\n그래도 확정할까요? (확정하면 이력서 평가의 기준이 돼요. 판단은 담당자가 해요)`)) return;
+  }
+  savePosting('confirmed');
+});
 saveDraftBtn.addEventListener('click', () => savePosting('draft'));
 
 postingBody.addEventListener('click', async e => {
@@ -3139,7 +3292,7 @@ document.getElementById('adminAddBtn').addEventListener('click', async () => {
 });
 
 document.body.classList.add('booting');
-bootApp();
+// (bootApp() 호출은 이 파일의 맨 마지막으로 옮겼어요: 아래 지원자 관리·일괄 점수 같은 코드가 모두 선언된 뒤에 시작해야 안전해요)
 
 
 // ---------- 지원자 관리 (노션 「진행중 채용」과 같은 데이터를 읽고 씀) ----------
@@ -3662,3 +3815,6 @@ batchBody.addEventListener('click', async e => {
   if (e.target.closest('.batch-retry-btn')) { batchRun([row]); return; }
   if (e.target.closest('.batch-remove-btn')) { batchRows = batchRows.filter(r => r.id !== row.id); batchRender(); batchInfoRefresh(); return; }
 });
+
+// ---------- 끝까지 실행됐다는 표시 (이 줄에 도달했다면 위쪽 코드가 중간에 멈추지 않았다는 뜻이에요) ----------
+window.__appScriptCompleted = true;

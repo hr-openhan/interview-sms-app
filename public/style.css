@@ -1783,3 +1783,32 @@ body.has-dock .wrap { padding-bottom: 90px; }
 /* 일정 배지가 좁은 칸에서 둥근 알약 모양 때문에 어색하게 꺾이지 않게: 여러 줄이면 모서리만 살짝 둥글게 */
 .ap-sch { border-radius: 8px; white-space: normal; overflow-wrap: anywhere; }
 td[data-label="이름"] .ap-sch { margin-top: 4px; font-size: 11px; }
+
+/* 회사 소개·공통 인재상: 글칸 안쪽 스크롤바 없이 내용 길이만큼 늘어남 (상자를 누르면 펴지고, 다시 누르면 접힘) */
+#companyIntroInput, #idealProfileInput { overflow: hidden; resize: none; min-height: 3em; }
+#companyBox > summary, #idealBox > summary, #rubricBox > summary { cursor: pointer; user-select: none; }
+
+/* 공고 점검 */
+.post-check { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbf9f3; }
+.post-check-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.post-check-summary { font-size: 13px; color: var(--muted, #6b6558); flex: 1 1 200px; min-width: 0; }
+.post-check-summary.ok { color: #2f6b34; font-weight: 600; }
+.post-check-summary.warn { color: #9a5b12; font-weight: 600; }
+.post-check-summary.error { color: #9a3b2e; font-weight: 600; }
+.post-check-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.post-check-list li { padding: 6px 9px; border-radius: 6px; font-size: 13px; line-height: 1.5; background: #fff; border-left: 4px solid #ccc; overflow-wrap: anywhere; }
+.post-check-list li.error { border-left-color: #c0584a; background: #fdf3f1; }
+.post-check-list li.warn { border-left-color: #d79a3a; background: #fffaf0; }
+.post-check-list li.info { border-left-color: #9aa59a; }
+.post-check-list .pc-level { display: inline-block; min-width: 56px; font-size: 11px; font-weight: 700; margin-right: 6px; }
+.post-check-list .pc-tip { display: block; color: var(--muted, #6b6558); font-size: 12px; margin-top: 2px; }
+.post-check-list .pc-go { font-size: 12px; padding: 0 0 0 6px; }
+.post-check-note { margin: 8px 0 0; font-size: 12px; }
+
+/* 긴 설명은 한 줄 요약만 보이고, 필요할 때 "자세히 보기"로 펼쳐요 */
+details.help { margin: 2px 0 8px; }
+details.help > summary { cursor: pointer; font-size: 12px; color: var(--muted, #6b6558); width: fit-content; list-style: none; user-select: none; }
+details.help > summary::-webkit-details-marker { display: none; }
+details.help > summary::before { content: "▸ "; }
+details.help[open] > summary::before { content: "▾ "; }
+details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--line); font-size: 12px; }
