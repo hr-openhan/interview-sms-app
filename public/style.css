@@ -1684,16 +1684,6 @@ body.has-dock .wrap { padding-bottom: 90px; }
 .req-tag.req-part { background: #fdf3d9; color: #8a6a10; }
 .req-tag.req-no { background: #f3e8e4; color: #8a4a3a; }
 .req-tag.req-unk { background: #ece9e2; color: #6b6558; }
-.import-list { display: grid; gap: 10px; margin: 8px 0; }
-.import-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; display: grid; gap: 6px; }
-.import-card.skip { opacity: .55; }
-.import-card-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.import-card-head select { flex: 0 1 180px; min-width: 0; }
-.import-card-head input[type="text"] { flex: 1 1 200px; min-width: 0; }
-.import-card textarea { width: 100%; box-sizing: border-box; font-size: 13px; }
-.import-card .import-note { margin: 0; font-size: 12px; color: var(--muted, #6b6558); }
-.import-card .import-note.warn { color: #9a5b12; }
-.import-card.invalid { border-color: #c0584a; }
 
 /* ---------- 지원자 관리 ---------- */
 .ap-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
@@ -1846,3 +1836,22 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .manual-cand { display: grid; gap: 6px; padding-top: 6px; }
 .manual-cand input { width: 100%; box-sizing: border-box; max-width: 100%; }
 #pasteBox textarea, #manualBox textarea { width: 100%; box-sizing: border-box; max-width: 100%; }
+
+/* 사람인 포지션 상세 복사 */
+.copy-detail { margin: 6px 0 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.copy-detail .status { flex: 1 1 100%; margin: 0; }
+.copy-detail textarea { flex: 1 1 100%; width: 100%; box-sizing: border-box; max-width: 100%; }
+
+/* 경력·학력 칸, 선택 요소, 사람인 입력용 정리 */
+.career-hint { margin: 4px 0 0; }
+.career-hint .link-btn { margin-left: 6px; }
+.draft-options .check-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.saramin-list { display: grid; gap: 8px; margin-top: 8px; }
+.sr-row { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; }
+.sr-row.sr-empty { background: #fbf6ec; }
+.sr-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sr-head .sr-copy { margin-left: auto; }
+.sr-badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: #f3dfb8; color: #7a4e0a; }
+.sr-val { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 14px; max-width: 100%; }
+.sr-warn { color: #9a5b12; margin: 0; }
+.sr-shown { width: 100%; box-sizing: border-box; max-width: 100%; }

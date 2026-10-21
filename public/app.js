@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-5';
+const APP_VERSION = '2026.10.21-6';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -1810,6 +1810,7 @@ function fillEditor(p) {
   postProfile.value = ['junior', 'fashion'].includes(p.profile) ? p.profile : 'experienced';
   postApplyStart.value = p.applyStart || '';
   postApplyEnd.value = p.applyEnd || '';
+  postCareer.value = p.career || ''; postEducation.value = p.education || ''; setCareerState(p.career ? 'set' : 'empty');   // 저장된 경력·학력
   applyEndTouched = true;
   postJd.value = p.jd || '';
   variantBox.hidden = true; variantsState = []; variantEdited = false;
@@ -1831,7 +1832,10 @@ function resetEditor() {
   postJd.value = '';
   postNotes.value = '';
   postCheckSeq++; clearTimeout(postCheckTimer); runPostCheck();   // 새 공고에 이전 공고의 점검 결과가 남지 않게(빈 글이면 처음 안내로 돌아가요)
-  jdTplSelect.value = ''; setJdTplStatus(''); jdTplRec.hidden = true; jdTplRec.innerHTML = '';   // JD 템플릿 박스도 처음 상태로(이전 공고의 템플릿 선택·"채웠어요" 안내가 남지 않게)
+  jdTplSelect.value = ''; setJdTplStatus(''); jdTplRec.hidden = true; jdTplRec.innerHTML = '';
+  copyDetailStatus.textContent = ''; copyDetailShown.hidden = true;   // 이전 공고의 복사 안내가 남지 않게
+  postCareer.value = ''; postEducation.value = ''; setCareerState('empty');   // 이전 공고의 경력·학력이 남지 않게
+  saraminList.innerHTML = ''; saraminStatus.textContent = '';   // 이전 공고의 사람인 입력용 정리가 남지 않게
   variantBox.hidden = true; variantsState = []; variantEdited = false;
   applyDefaultsToForm();
   loadTeamRef();
@@ -1951,7 +1955,7 @@ function updateTeamBrandHint(keep) {
   postBrandHint.hidden = false;
   postBrandHint.textContent = !options.length
     ? `${team}에는 등록된 브랜드가 없어요. 공통 공고로 만들어져요. (브랜드는 아래 "팀과 맡은 브랜드"에서 적어두면 여기서 고를 수 있어요)`
-    : postBrandMode.value === 'has' ? `${postBrand.value} 브랜드 공고예요. AI 초안이 이 브랜드를 참고하고 모집 개요에 브랜드가 적혀요.` : '특정 브랜드가 없는 공통 공고예요. 브랜드가 있으면 "있음"을 고르세요.';
+    : postBrandMode.value === 'has' ? `${postBrand.value} 브랜드 공고예요. AI 초안이 맨 위 소개 문장에 "${postBrand.value} ○○팀 소속으로 …"처럼 브랜드 이름을 써요. JD 템플릿으로 채워도 소개 문장에 들어가요.` : '특정 브랜드가 없는 공통 공고예요. 브랜드가 있으면 "있음"을 고르세요.';
   updatePositionHint();   // 브랜드가 바뀌면 "이미 만든 포지션이에요" 안내(같은 팀·포지션·브랜드 기준)도 다시 계산
 }
 postBrandMode.addEventListener('change', () => { postDirty = true; updateTeamBrandHint(postBrandMode.value === 'has' ? (postBrand.value || undefined) : ''); });
@@ -2037,6 +2041,23 @@ document.getElementById('resetTeamRefBtn').addEventListener('click', async () =>
   } catch (err) { teamRefStatus.textContent = err.message || ''; teamRefStatus.className = 'status err'; }
 });
 
+// 경력 칸의 상태: empty(비어 있음) / suggested(AI·템플릿이 추천한 값, 아직 확인 안 함) / set(사람이 쓰거나 확인함)
+const postCareer = document.getElementById('postCareer'), postEducation = document.getElementById('postEducation');
+const exIntro = document.getElementById('exIntro'), exGrowth = document.getElementById('exGrowth'), exClosing = document.getElementById('exClosing'), aiFocusEl = document.getElementById('aiFocus');
+const saraminList = document.getElementById('saraminList'), saraminStatus = document.getElementById('saraminStatus');
+const postCareerHint = document.getElementById('postCareerHint');
+let careerState = 'empty';
+function setCareerState(st) { careerState = st; postCareerHint.hidden = st !== 'suggested'; }
+// 추천값은 칸이 비어 있거나 아직 추천값일 때만 채워요(사람이 직접 쓴 경력을 AI 추천이 덮어쓰지 않게)
+function applyCareerSuggestion(sug) {
+  const v = String(sug || '').trim();
+  if (!v) return;
+  if (postCareer.value.trim() && careerState === 'set') return;
+  postCareer.value = v; setCareerState('suggested'); postDirty = true;
+}
+postCareer.addEventListener('input', () => { setCareerState(postCareer.value.trim() ? 'set' : 'empty'); postDirty = true; });
+postEducation.addEventListener('input', () => { postDirty = true; });
+document.getElementById('postCareerOkBtn').addEventListener('click', () => setCareerState(postCareer.value.trim() ? 'set' : 'empty'));
 function collectPosting() {
   return {
     team: currentTeam(),
@@ -2046,6 +2067,8 @@ function collectPosting() {
     employmentType: postType.value,
     months: postMonths.value === '' ? null : Number(postMonths.value),
     profile: postProfile.value,
+    career: postCareer.value,
+    education: postEducation.value,
     applyStart: postApplyStart.value,
     applyEnd: postApplyEnd.value,
     jd: postJd.value,
@@ -2074,18 +2097,19 @@ draftJdBtn.addEventListener('click', async () => {
     const c = collectPosting();
     const res = await fetch('/api/postings/draft', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, profile: c.profile, portfolio: postPortfolio.checked, variants: 3, notes: postNotes.value, baseJd }),
+      body: JSON.stringify({ team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, profile: c.profile, portfolio: postPortfolio.checked, variants: 3, notes: postNotes.value, baseJd, extras: { intro: exIntro.checked, growth: exGrowth.checked, closing: exClosing.checked }, aiFocus: aiFocusEl.checked }),
     });
     const data = await res.json().catch(() => null);
     if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
     if (!res.ok) throw new Error(data.error || '초안 작성 실패');
-    variantsState = data.variants || [{ key: 'A', label: '초안', jd: data.jd }];
+    variantsState = data.variants || [{ key: 'A', label: '초안', jd: data.jd, careerSuggestion: data.careerSuggestion || '' }];
     renderVariants(0);
     postJd.value = data.jd;
+    applyCareerSuggestion(variantsState[0].careerSuggestion);   // 경력은 본문이 아니라 경력 칸에 추천값으로 들어가요
     variantEdited = false;
     postDirty = true;
     updatePostTodo();
-    setPostStatus(`초안을 만들었어요${variantsState.length > 1 ? ` (${variantsState.length}가지 — 위에서 방향을 골라보세요)` : ''}. 꼭 읽어보세요. 경력과 필요 사항은 AI가 추천한 값이에요([추천] 표시) — 맞는지 확인하고 고친 뒤 표시를 지우고, [입력] 부분은 채워서 확정하세요.${data.failed ? ` (${data.failed}가지는 만들지 못했어요)` : ''}`, 'ok');
+    setPostStatus(`초안을 만들었어요${variantsState.length > 1 ? ` (${variantsState.length}가지 — 위에서 방향을 골라보세요)` : ''}. 꼭 읽어보세요. ${careerState === 'suggested' ? `경력은 AI가 추천한 값(${postCareer.value})이에요 — 위 "경력" 칸에서 확인하고 고쳐주세요. ` : ''}[입력] 표시가 남아 있으면 채워서 확정하세요.${data.failed ? ` (${data.failed}가지는 만들지 못했어요)` : ''}`, 'ok');
     postJd.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (err) {
     setPostStatus(err.message || '초안을 만드는 중 오류가 발생했어요. 직접 작성하셔도 돼요.', 'err');
@@ -2106,91 +2130,12 @@ variantBtns.addEventListener('click', e => {
   const i = Number(btn.dataset.i);
   if (variantEdited && !confirm('고른 초안을 고치셨어요.\n다른 초안으로 바꾸면 고친 내용이 사라져요. 바꿀까요?')) return;
   postJd.value = variantsState[i].jd;
+  if (careerState === 'suggested') { postCareer.value = ''; setCareerState('empty'); }   // 아직 확인 안 한 추천값이면 고른 안의 추천값으로 바꿔요
+  applyCareerSuggestion(variantsState[i].careerSuggestion);
   variantEdited = false;
   postDirty = true;
   updatePostTodo();
   renderVariants(i);
-});
-
-// ---------- 기존 공고에서 가져오기 ----------
-const importText = document.getElementById('importText');
-const importStatus = document.getElementById('importStatus');
-const importList = document.getElementById('importList');
-const importSaveBox = document.getElementById('importSaveBox');
-let importItems = [];
-function setImportStatus(msg, cls) { importStatus.textContent = msg || ''; importStatus.className = 'status' + (cls ? ' ' + cls : ''); }
-function renderImportItems() {
-  importSaveBox.hidden = !importItems.length;
-  importList.innerHTML = importItems.map((it, i) => {
-    const dup = postingsAll.filter(p => it.team && p.team === it.team && p.position === it.position).length;
-    const notes = [];
-    if (!it.team && it.rawTeam) notes.push(`<p class="import-note warn">글에는 "${escapeHtml(it.rawTeam)}"로 적혀 있어요. 면접 일정에 있는 팀을 골라주세요.</p>`);
-    else if (!it.team) notes.push('<p class="import-note warn">팀을 골라주세요.</p>');
-    if (dup) notes.push(`<p class="import-note warn">이미 같은 팀·포지션 공고가 ${dup}개 있어요. 그래도 새로 저장돼요.</p>`);
-    return `<div class="import-card" data-i="${i}">
-      <div class="import-card-head">
-        <label class="check-chip"><input type="checkbox" class="import-use" checked /> 저장</label>
-        <select class="import-team" aria-label="팀"><option value="">팀 선택</option>${postTeams.map(t => `<option value="${escapeHtml(t)}"${t === it.team ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select>
-        <input type="text" class="import-pos" maxlength="${POSTING_POSITION_MAX}" value="${escapeHtml(it.position)}" placeholder="포지션 이름" aria-label="포지션" />
-        <select class="import-profile" aria-label="채용 유형"><option value="experienced"${['junior', 'fashion'].includes(it.profile) ? '' : ' selected'}>경력직</option><option value="junior"${it.profile === 'junior' ? ' selected' : ''}>신입직</option><option value="fashion"${it.profile === 'fashion' ? ' selected' : ''}>패션 직무형</option></select>
-      </div>
-      <textarea class="import-body" rows="6" aria-label="공고 내용">${escapeHtml(it.body)}</textarea>
-      ${notes.join('')}
-    </div>`;
-  }).join('');
-  importList.querySelectorAll('.import-use').forEach(cb => cb.addEventListener('change', () => cb.closest('.import-card').classList.toggle('skip', !cb.checked)));
-}
-const POSTING_POSITION_MAX = 100;
-document.getElementById('importSplitBtn').addEventListener('click', async () => {
-  const text = importText.value.trim();
-  if (text.length < 30) { setImportStatus('가져올 공고 글을 먼저 붙여넣어 주세요.', 'err'); return; }
-  const btn = document.getElementById('importSplitBtn');
-  btn.disabled = true; const label = btn.textContent; btn.textContent = '나누는 중... (최대 1분)'; setImportStatus('');
-  try {
-    const res = await fetch('/api/postings/import-split', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-    const data = await readJsonOrNull(res);
-    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
-    if (!res.ok) throw new Error(data.error || '나누기 실패');
-    importItems = data.items;
-    renderImportItems();
-    setImportStatus(`${importItems.length}개 포지션으로 나눴어요. 내용을 확인하고, 저장할 것만 남겨서 저장하세요. (팀이 비어 있으면 골라주세요)`, 'ok');
-  } catch (err) { setImportStatus(err.message || '나누는 중 오류가 발생했어요.', 'err'); }
-  finally { btn.disabled = false; btn.textContent = label; }
-});
-document.getElementById('importSingleBtn').addEventListener('click', () => {
-  const text = importText.value.trim();
-  if (text.length < 30) { setImportStatus('가져올 공고 글을 먼저 붙여넣어 주세요.', 'err'); return; }
-  importItems = [{ team: '', rawTeam: '', position: '', body: text.slice(0, 8000) }];
-  renderImportItems();
-  setImportStatus('글 전체를 한 공고로 가져왔어요. 팀과 포지션을 입력하고 저장하세요.' + (text.length > 8000 ? ' (8000자까지만 가져와요)' : ''), 'ok');
-});
-document.getElementById('importSaveBtn').addEventListener('click', async () => {
-  const cards = [...importList.querySelectorAll('.import-card')];
-  const items = [];
-  let bad = 0;
-  cards.forEach(card => {
-    card.classList.remove('invalid');
-    if (!card.querySelector('.import-use').checked) return;
-    const it = { team: card.querySelector('.import-team').value, position: card.querySelector('.import-pos').value.trim(), profile: card.querySelector('.import-profile').value, body: card.querySelector('.import-body').value.trim() };
-    if (!it.team || !it.position || it.body.length < 20) { card.classList.add('invalid'); bad++; }
-    items.push(it);
-  });
-  if (!items.length) { setImportStatus('저장할 공고를 하나 이상 골라주세요.', 'err'); return; }
-  if (bad) { setImportStatus(`팀·포지션·내용(20자 이상)이 빠진 공고가 ${bad}개 있어요. 빨간 테두리 칸을 채우거나 "저장"을 꺼주세요.`, 'err'); return; }
-  const status = document.querySelector('input[name="importStatusSel"]:checked').value;
-  const btn = document.getElementById('importSaveBtn');
-  btn.disabled = true;
-  try {
-    const res = await fetch('/api/postings/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, status }) });
-    const data = await readJsonOrNull(res);
-    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
-    if (!res.ok) throw new Error(data.error || '저장 실패');
-    await loadPostings();
-    importItems = []; importList.innerHTML = ''; importSaveBox.hidden = true; importText.value = '';
-    setImportStatus(`${data.count}개를 ${status === 'confirmed' ? '확정 공고로' : '작성 중으로'} 저장했어요.${status === 'confirmed' ? ' 아래 "이력서 평가"의 평가할 공고에서 고르면 이 공고가 채점 기준이 돼요.' : ' 확정하면 채점 기준으로 쓸 수 있어요.'}`, 'ok');
-    document.getElementById('postingBody').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (err) { setImportStatus(err.message || '저장 중 오류가 발생했어요.', 'err'); }
-  finally { btn.disabled = false; }
 });
 
 // ---------- JD 템플릿 (AI 없이 본문 채우기) ----------
@@ -2232,13 +2177,14 @@ async function fillFromTemplate(id) {
   if (postJd.value.trim() && !confirm('지금 써 둔 공고문이 있어요.\n템플릿 내용으로 바꿀까요? 쓰던 내용은 사라져요.\n\n[취소]를 누르면 아무것도 바뀌지 않아요.')) return;
   const c = collectPosting();
   try {
-    const res = await fetch('/api/postings/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId: id, team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, portfolio: postPortfolio.checked }) });
+    const res = await fetch('/api/postings/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId: id, team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, portfolio: postPortfolio.checked, aiFocus: aiFocusEl.checked }) });
     const data = await res.json().catch(() => null);
     if (!data) throw new Error('서버가 응답하지 못했어요.');
     if (!res.ok) throw new Error(data.error || '채우기 실패');
     postJd.value = data.jd; postDirty = true; variantEdited = false; variantBox.hidden = true; variantsState = [];
+    applyCareerSuggestion(data.careerSuggestion);
     updatePostTodo(); runPostCheck();
-    setJdTplStatus(`"${data.title}" 템플릿으로 채웠어요. ${data.recommended ? '경력 연차는 추천값이에요([추천] 표시) — 확인하고 고쳐주세요. ' : ''}${data.placeholders ? `[입력] ${data.placeholders}곳은 직접 채워주세요.` : ''}`, 'ok');
+    setJdTplStatus(`"${data.title}" 템플릿으로 채웠어요. ${careerState === 'suggested' ? `경력은 템플릿의 추천값(${postCareer.value})이에요 — 위 "경력" 칸에서 확인하고 고쳐주세요. ` : ''}${data.aiFocusApplied ? 'AI 활용 항목을 요건·우대에 넣고 지원 방법에 AI 작업 사례 줄을 붙였어요. ' : ''}${data.placeholders ? `[입력] ${data.placeholders}곳은 직접 채워주세요.` : ''}`, 'ok');
   } catch (err) { setJdTplStatus(err.message || '채우는 중 오류가 발생했어요.', 'err'); }
 }
 document.getElementById('jdTplFillBtn').addEventListener('click', () => fillFromTemplate(jdTplSelect.value));
@@ -2251,6 +2197,7 @@ const jdMgrSel = document.getElementById('jdTplMgrSelect');
 const jdMgrTitle = document.getElementById('jdTplMgrTitle');
 const jdMgrKeywords = document.getElementById('jdTplMgrKeywords');
 const jdMgrBody = document.getElementById('jdTplMgrBody');
+const jdMgrCareer = document.getElementById('jdTplMgrCareer');
 const jdMgrStatus = document.getElementById('jdTplMgrStatus');
 let jdMgrMode = 'view';   // view | edit | new
 function setJdMgrStatus(msg, cls) { jdMgrStatus.textContent = msg || ''; jdMgrStatus.className = 'status' + (cls ? ' ' + cls : ''); }
@@ -2264,11 +2211,11 @@ function jdMgrButtons() {
   document.getElementById('jdTplDeleteBtn').hidden = !(jdMgrMode === 'edit' && t && !t.isDefault);
   document.getElementById('jdTplNewBtn').hidden = editing;
   jdMgrSel.disabled = editing;
-  [jdMgrTitle, jdMgrKeywords, jdMgrBody].forEach(el => { el.readOnly = !editing; });
+  [jdMgrTitle, jdMgrKeywords, jdMgrCareer, jdMgrBody].forEach(el => { el.readOnly = !editing; });
 }
 function jdMgrFill() {
   const t = jdMgrCurrent();
-  jdMgrTitle.value = t ? t.title : ''; jdMgrKeywords.value = t ? (t.keywords || []).join(', ') : ''; jdMgrBody.value = t ? t.body : '';
+  jdMgrTitle.value = t ? t.title : ''; jdMgrKeywords.value = t ? (t.keywords || []).join(', ') : ''; jdMgrCareer.value = t ? (t.career || '') : ''; jdMgrBody.value = t ? t.body : '';
   jdMgrButtons(); autoGrow(jdMgrBody);
 }
 function renderJdTplMgr(keep) {
@@ -2278,18 +2225,18 @@ function renderJdTplMgr(keep) {
   if (jdMgrMode === 'view') jdMgrFill();
 }
 function jdMgrDirty() {
-  if (jdMgrMode === 'new') return !!(jdMgrTitle.value.trim() || jdMgrKeywords.value.trim() || jdMgrBody.value.trim());
+  if (jdMgrMode === 'new') return !!(jdMgrTitle.value.trim() || jdMgrKeywords.value.trim() || jdMgrCareer.value.trim() || jdMgrBody.value.trim());
   const t = jdMgrCurrent(); if (!t) return false;
-  return jdMgrTitle.value !== t.title || jdMgrKeywords.value !== (t.keywords || []).join(', ') || jdMgrBody.value !== t.body;
+  return jdMgrTitle.value !== t.title || jdMgrKeywords.value !== (t.keywords || []).join(', ') || jdMgrCareer.value !== (t.career || '') || jdMgrBody.value !== t.body;
 }
 jdMgrSel.addEventListener('change', jdMgrFill);
 jdMgrBody.addEventListener('input', () => autoGrow(jdMgrBody));
 document.getElementById('jdTplMgrBox').addEventListener('toggle', e => { if (e.target.open) autoGrow(jdMgrBody); });
 document.getElementById('jdTplEditBtn').addEventListener('click', () => { jdMgrMode = 'edit'; setJdMgrStatus(''); jdMgrButtons(); jdMgrTitle.focus(); });
 document.getElementById('jdTplNewBtn').addEventListener('click', () => {
-  jdMgrMode = 'new'; setJdMgrStatus('새 템플릿의 이름·단어·본문을 쓰고 저장하세요. 아래 본문은 소제목 4개를 미리 넣어 둔 틀이에요.');
-  jdMgrTitle.value = ''; jdMgrKeywords.value = '';
-  jdMgrBody.value = '[이런 일을 함께해요]\n- \n\n[이런 분이었으면 좋겠어요]\n- 경력: \n- \n\n[이런 경험이 있다면 더 좋아요]\n- \n\n[이런 분과 함께하고 싶어요]\n[입력]';
+  jdMgrMode = 'new'; setJdMgrStatus('새 템플릿의 이름·단어·본문을 쓰고 저장하세요. 아래 본문은 소개 문장과 소제목 3개를 미리 넣어 둔 틀이에요.');
+  jdMgrTitle.value = ''; jdMgrKeywords.value = ''; jdMgrCareer.value = '';
+  jdMgrBody.value = '{{brand}}{{team}} 소속으로 (이 포지션이 하는 일을 한두 문장으로 써주세요).\n이런 일을 함께해요\n- \n이런 분이었으면 좋겠어요\n- (경력 조건을 문장으로: 예) ○○ 경험이 3년 이상 있는 분)\n- \n이런 경험이 있다면 더 좋아요\n- ';
   jdMgrButtons(); autoGrow(jdMgrBody); jdMgrTitle.focus();
 });
 document.getElementById('jdTplCancelBtn').addEventListener('click', () => {
@@ -2298,7 +2245,7 @@ document.getElementById('jdTplCancelBtn').addEventListener('click', () => {
 });
 document.getElementById('jdTplSaveBtn').addEventListener('click', async () => {
   const btn = document.getElementById('jdTplSaveBtn'); btn.disabled = true;
-  const body = { title: jdMgrTitle.value, keywords: jdMgrKeywords.value, body: jdMgrBody.value };
+  const body = { title: jdMgrTitle.value, keywords: jdMgrKeywords.value, career: jdMgrCareer.value, body: jdMgrBody.value };
   try {
     const isNew = jdMgrMode === 'new';
     const res = await fetch(isNew ? '/api/jd-templates' : '/api/jd-templates/' + encodeURIComponent(jdMgrSel.value), { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -2331,6 +2278,76 @@ document.getElementById('jdTplDeleteBtn').addEventListener('click', async () => 
     renderJdTplSelect(); renderJdTplMgr(jdTemplates[0] && jdTemplates[0].id); refreshJdRecommend(); setJdMgrStatus('삭제했어요.', 'ok');
   } catch (err) { setJdMgrStatus(err.message || '삭제 중 오류가 발생했어요.', 'err'); }
 });
+
+// ---------- 사람인 "포지션 상세" 복사 ----------
+// 모집 개요와 공통 안내를 뺀 포지션 상세를 클립보드에 복사해요. [입력]·[추천] 표시가 남아 있으면 사람인에 그대로 올라가므로 먼저 확인을 물어요.
+const copyDetailStatus = document.getElementById('copyDetailStatus');
+const copyDetailShown = document.getElementById('copyDetailShown');
+function setCopyStatus(msg, cls) { copyDetailStatus.textContent = msg || ''; copyDetailStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+document.getElementById('copyDetailBtn').addEventListener('click', async () => {
+  const jd = postJd.value;
+  if (!jd.trim()) { setCopyStatus('복사할 공고문이 비어 있어요.', 'err'); return; }
+  const btn = document.getElementById('copyDetailBtn'); btn.disabled = true; setCopyStatus(''); copyDetailShown.hidden = true;
+  try {
+    const res = await fetch('/api/postings/position-detail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jd }) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok || !data.success) throw new Error(data.error || '복사할 글을 만들지 못했어요.');
+    const warns = [];
+    if (data.input) warns.push(`[입력] 표시가 ${data.input}곳 남아 있어요(직접 채우는 곳)`);
+    if (data.recommend) warns.push(`[추천] 표시가 ${data.recommend}곳 남아 있어요(경력 조건 확인 전)`);
+    if (!data.hasSections) warns.push('소제목 3개(이런 일을 함께해요 / 이런 분이었으면 좋겠어요 / 이런 경험이 있다면 더 좋아요)가 모두 있지는 않아요');
+    if (warns.length && !confirm(`사람인에 올릴 글에 확인할 것이 있어요:\n· ${warns.join('\n· ')}\n\n이대로 사람인에 올라갈 수 있어요. 그래도 복사할까요?\n[취소]를 누르면 복사하지 않아요.`)) { setCopyStatus('복사하지 않았어요. 표시를 확인하고 고친 뒤 다시 눌러주세요.', 'err'); return; }
+    let copied = false;
+    try { await navigator.clipboard.writeText(data.text); copied = true; } catch { /* 복사 권한이 없으면 아래 글칸에 보여줘요 */ }
+    copyDetailShown.value = data.text; copyDetailShown.hidden = copied;
+    setCopyStatus(copied ? `포지션 상세를 복사했어요${data.legacy ? ' (예전 형식이라 소제목의 대괄호와 경력 줄을 링크 공고 형식으로 바꿨어요)' : ''}. 사람인 모집요강의 "포지션 상세" 칸에 붙여넣으세요.` : '자동 복사가 막혀 있어요. 아래 글칸의 내용을 전체 선택해서 직접 복사하세요.', 'ok');
+    if (!copied) { copyDetailShown.focus(); copyDetailShown.select(); }
+  } catch (err) { setCopyStatus(err.message || '복사하는 중 오류가 발생했어요.', 'err'); }
+  finally { btn.disabled = false; }
+});
+
+// ---------- 사람인 입력용 정리 ----------
+// 사람인 공고 등록 화면의 칸별로 값을 정리하고 칸마다 복사할 수 있게 해요. 칸이 비어 있으면(경력·학력·자격요건 등) "입력 필요"로 표시해요.
+async function copyText(text, shownEl) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* 권한이 없으면 글칸에 보여줘요 */ }
+  if (shownEl) { shownEl.hidden = false; shownEl.value = text; shownEl.focus(); shownEl.select(); }
+  return false;
+}
+async function refreshSaramin() {
+  if (!postJd.value.trim()) { saraminStatus.textContent = '정리할 공고문이 비어 있어요.'; saraminStatus.className = 'status err'; saraminList.innerHTML = ''; return; }
+  const c = collectPosting();
+  saraminStatus.textContent = ''; saraminStatus.className = 'status';
+  try {
+    const res = await fetch('/api/postings/saramin-fields', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jd: c.jd, career: c.career, education: c.education, employmentType: c.employmentType, months: c.months, workplace: c.workplace }) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok || !data.success) throw new Error(data.error || '정리하지 못했어요.');
+    const notes = [];
+    if (data.missing.length) notes.push(`비어 있는 칸: ${data.missing.join(', ')}`);
+    if (data.input) notes.push(`[입력] 표시 ${data.input}곳`);
+    if (data.recommend) notes.push(`[추천] 표시 ${data.recommend}곳`);
+    if (careerState === 'suggested') notes.push('경력은 추천값이고 아직 확인하지 않았어요');
+    saraminList.innerHTML = (notes.length ? `<p class="manage-hint sr-warn">확인할 것: ${escapeHtml(notes.join(' · '))}</p>` : '') + data.fields.map(f => `
+      <div class="sr-row${f.value ? '' : ' sr-empty'}" data-key="${escapeHtml(f.key)}">
+        <div class="sr-head"><strong>${escapeHtml(f.label)}</strong>${f.value ? '' : `<span class="sr-badge">${f.needed ? '입력 필요' : '없음'}</span>`}<button type="button" class="link-btn sr-copy"${f.value ? '' : ' disabled'}>복사</button></div>
+        <pre class="sr-val">${f.value ? escapeHtml(f.value) : '(비어 있어요)'}</pre>
+      </div>`).join('') + '<textarea class="sr-shown" rows="6" readonly hidden aria-label="자동 복사가 안 될 때 직접 복사하세요"></textarea>';
+    // 필요한 칸이 모두 찼어도 선택 칸(급여·근무일시·우대사항)이 비어 있을 수 있어서, "모든 칸이 채워졌다"고 말하지 않고 비어 있는 칸을 정확히 알려요
+    const emptyOptional = data.fields.filter(f => !f.needed && !f.value).map(f => f.label);
+    saraminStatus.textContent = notes.length ? '' : `필요한 칸은 모두 채워져 있어요.${emptyOptional.length ? ` (${emptyOptional.join('·')}은 비어 있어요 — 사람인에서 직접 입력하거나 비워 두세요)` : ''} 칸마다 복사해서 사람인에 붙여넣으세요.`;
+    saraminStatus.className = 'status' + (notes.length ? '' : ' ok');
+  } catch (err) { saraminStatus.textContent = err.message || '정리하는 중 오류가 발생했어요.'; saraminStatus.className = 'status err'; }
+}
+document.getElementById('saraminRefreshBtn').addEventListener('click', refreshSaramin);
+saraminList.addEventListener('click', async e => {
+  const b = e.target.closest('.sr-copy'); if (!b) return;
+  const row = b.closest('.sr-row'); const text = row.querySelector('.sr-val').textContent;
+  const ok = await copyText(text, saraminList.querySelector('.sr-shown'));
+  saraminStatus.textContent = ok ? `"${row.querySelector('strong').textContent}" 칸을 복사했어요.` : '자동 복사가 막혀 있어요. 아래 글칸의 내용을 직접 복사하세요.';
+  saraminStatus.className = 'status ok';
+});
+document.getElementById('saraminBox').addEventListener('toggle', e => { if (e.target.open) refreshSaramin(); });
 
 // ---------- 공고 점검 (서버의 규칙 기반 점검 결과를 보여줌 / AI를 쓰지 않아 비용이 들지 않아요) ----------
 const postCheckList = document.getElementById('postCheckList');
@@ -2431,11 +2448,16 @@ confirmPostingBtn.addEventListener('click', async () => {
   // [입력]·[추천] 표시가 남은 것은 아래 savePosting이 따로 확인하므로, 같은 경고를 두 번 묻지 않게 여기서는 뺌
   const dup = new Set(['placeholder', 'aiTag']);
   const need = r ? r.findings.filter(f => f.level !== 'info' && !dup.has(f.code)) : [];
+  // 경력 칸이 비었거나 추천값을 아직 확인하지 않았으면 같은 확인창에 함께 알려요(확인창이 연달아 뜨지 않게)
+  const careerNote = careerState === 'empty' ? '경력 칸이 비어 있어요(사람인 입력용 정리에서 필요해요).' : (careerState === 'suggested' ? `경력(${postCareer.value.trim()})은 추천값이고 아직 확인하지 않았어요.` : '');
+  if (!need.length && careerNote) {
+    if (!confirm(`확인할 것이 있어요.\n\n· ${careerNote}\n\n그래도 확정할까요? (확정하면 이력서 평가의 기준이 돼요)\n[취소]를 누르면 확정하지 않아요.`)) return;
+  }
   if (need.length) {
     const grouped = groupFindings(need);
     const nErr = grouped.filter(f => f.level === 'error').length, nWarn = grouped.length - nErr;
     const top = grouped.slice(0, 5).map(f => `· ${PC_LABEL[f.level]}: ${f.title}${f.items.length ? ` ("${f.items[0].match}"${f.items.length > 1 ? ` 외 ${f.items.length - 1}곳` : ''})` : ''}`).join('\n');
-    if (!confirm(`공고 점검에서 ${nErr ? `수정 필요 ${nErr}건` : ''}${nErr && nWarn ? ', ' : ''}${nWarn ? `확인 필요 ${nWarn}건` : ''}이 나왔어요.\n\n${top}\n\n그래도 확정할까요? (확정하면 이력서 평가의 기준이 돼요. 판단은 담당자가 해요)`)) return;
+    if (!confirm(`공고 점검에서 ${nErr ? `수정 필요 ${nErr}건` : ''}${nErr && nWarn ? ', ' : ''}${nWarn ? `확인 필요 ${nWarn}건` : ''}이 나왔어요.\n\n${top}\n\n${careerNote ? `\n· 또 ${careerNote}` : ''}\n\n그래도 확정할까요? (확정하면 이력서 평가의 기준이 돼요. 판단은 담당자가 해요)`)) return;
   }
   savePosting('confirmed');
 });

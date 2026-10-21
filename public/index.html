@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-5">
+<html lang="ko" data-app-version="2026.10.21-6">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -533,25 +533,6 @@
           <span class="preview-label">공고 만들기</span>
         </div>
         <p class="manage-hint">① 팀 → ② 포지션 → ③ 근무 조건 순서로 입력하고 공고문을 만들어요. <strong>확정한 공고</strong>가 <strong>이력서 검토</strong> 탭에서 평가의 기준이 돼요. (AI 초안은 이력서 검토 탭에 있는 회사 소개·공통 인재상을 참고해요)</p>
-        <details id="importBox" class="rubric-box">
-          <summary>기존 공고에서 가져오기 (사람인 등에 올린 공고 → 팀·포지션별로 골라 저장)</summary>
-          <p class="manage-hint">이미 올린 공고 글을 붙여넣어 팀·포지션별로 나눠 저장해요.</p>
-        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">이미 올린 공고 글을 붙여넣으면 팀·포지션별로 나눠 줘요. 저장할 것만 골라 저장하면 <b>공고 데이터가 되고, 확정한 공고는 이력서 채점의 기준</b>이 돼요. 회사 소개·복지·전형 절차 같은 공통 내용은 빼고, 근무지(강남, SCM팀·와우서비스팀은 남양주)·수습 3개월·급여(면접 후 협상)는 기본값으로 채워요.</p></details>
-          <div class="field"><textarea id="importText" rows="8" maxlength="60000" placeholder="사람인·잡코리아 공고 글을 여기에 붙여넣으세요"></textarea></div>
-          <div class="posting-actions">
-            <button id="importSplitBtn" class="add-btn" type="button">✨ 팀·포지션별로 나누기 (AI)</button>
-            <button id="importSingleBtn" class="link-btn" type="button">이 글 전체를 한 공고로 가져오기</button>
-          </div>
-          <p class="status" id="importStatus"></p>
-          <div id="importList" class="import-list"></div>
-          <div id="importSaveBox" hidden>
-            <div class="posting-actions">
-              <label class="check-chip"><input type="radio" name="importStatusSel" value="confirmed" checked /> 확정으로 저장 (바로 이력서 채점의 기준으로 사용)</label>
-              <label class="check-chip"><input type="radio" name="importStatusSel" value="draft" /> 작성 중으로 저장</label>
-            </div>
-            <button id="importSaveBtn" class="add-btn" type="button">선택한 공고 저장</button>
-          </div>
-        </details>
         <div class="field-row">
           <div class="field">
             <label for="postTeam">① 팀</label>
@@ -582,6 +563,17 @@
             <option value="junior">신입직 — 프로젝트·학력·자격 중심 평가표</option>
             <option value="fashion">패션 직무형 — 직무·성과·도메인·경력 일관성·표현력 평가표 (5항목)</option>
           </select>
+        </div>
+        <div class="field">
+          <label for="postCareer">경력 <span class="manage-hint" style="margin:0">(사람인 "경력" 칸에 넣을 값 · 포지션 상세에는 연차를 안 써도 돼요)</span></label>
+          <input id="postCareer" type="text" maxlength="40" list="careerOptions" placeholder="예: 경력 3년 이상 / 경력무관(신입포함) / 신입" autocomplete="off" />
+          <datalist id="careerOptions"><option value="신입"></option><option value="경력무관(신입포함)"></option><option value="경력무관(신입제외)"></option><option value="경력 1년 이상"></option><option value="경력 2년 이상"></option><option value="경력 3년 이상"></option><option value="경력 5년 이상"></option><option value="경력 8년 이상"></option><option value="경력 10년 이상"></option></datalist>
+          <p id="postCareerHint" class="manage-hint career-hint" hidden>추천값이에요. 맞는지 확인하고 고쳐주세요. <button id="postCareerOkBtn" class="link-btn" type="button">맞아요</button></p>
+        </div>
+        <div class="field">
+          <label for="postEducation">학력 <span class="manage-hint" style="margin:0">(사람인 "학력" 칸에 넣을 값 · 비워 둘 수 있어요)</span></label>
+          <input id="postEducation" type="text" maxlength="40" list="educationOptions" placeholder="예: 대졸(4년제) 이상 / 학력무관" autocomplete="off" />
+          <datalist id="educationOptions"><option value="학력무관"></option><option value="고졸 이상"></option><option value="대졸(2,3년제) 이상"></option><option value="대졸(4년제) 이상"></option></datalist>
         </div>
         <button id="loadPrevPostingBtn" class="link-btn" type="button" hidden>이 포지션의 이전 공고 불러오기</button>
         <div class="field-row">
@@ -625,13 +617,22 @@
           </div>
           <p class="status" id="teamRefStatus"></p>
         </details>
+        <div class="field draft-options">
+          <span class="manage-hint" style="margin:0 0 4px">공고문에 넣을 요소 <span style="font-weight:400">(소개 문장·성장 경험·맺음 문장은 AI 초안에 적용돼요)</span></span>
+          <div class="check-row">
+            <label class="check-chip"><input id="exIntro" type="checkbox" checked /> 소개 문장</label>
+            <label class="check-chip"><input id="exGrowth" type="checkbox" /> 성장 경험 구역</label>
+            <label class="check-chip"><input id="exClosing" type="checkbox" /> 맺음 문장</label>
+            <label class="check-chip" title="요건·우대에 AI 활용 항목을 넣고, 지원 방법에 AI 작업 사례 첨부 줄을 붙여요 (AI 초안과 JD 템플릿 모두)"><input id="aiFocus" type="checkbox" /> AI 활용 강조</label>
+          </div>
+        </div>
         <div class="field">
           <label for="postNotes">AI에게 전할 추가 요청 (선택)</label>
           <input id="postNotes" type="text" maxlength="500" placeholder="예: 영어 응대 가능자 우대" />
         </div>
         <div class="posting-head">
           <button id="draftJdBtn" class="add-btn" type="button">✨ 공고문 만들기 (AI 초안 3가지)</button>
-          <span class="manage-hint">팀 직무 참고와 기존 공고를 보고 서로 다른 방향의 초안 3가지를 써요. 경력과 필요 사항도 추천해주고, 추천한 경력 줄에는 [추천] 표시가 붙으니 확인하고 고친 뒤 지워주세요.</span>
+          <span class="manage-hint">팀 직무 참고와 기존 공고를 보고 서로 다른 방향의 초안 3가지를 써요. 경력은 공고문이 아니라 위 "경력" 칸에 추천값으로 들어가니 확인해주세요.</span>
         </div>
         <div id="variantBox" class="variant-box" hidden>
           <span class="manage-hint" style="margin:0">초안을 골라보세요 (누르면 아래 공고문 칸에 들어가요):</span>
@@ -663,11 +664,21 @@
         <div class="posting-actions">
           <button id="confirmPostingBtn" class="add-btn" type="button">✅ 공고 확정</button>
           <button id="saveDraftBtn" class="add-btn" type="button">임시 저장</button>
-          <button id="copyPostingBtn" class="add-btn" type="button">복사하기</button>
+          <button id="copyPostingBtn" class="add-btn" type="button" title="모집 개요와 공통 안내까지 공고 전체를 복사해요 (잡코리아·사람인에 통째로 붙여넣을 때)">공고 전체 복사</button>
+          <button id="copyDetailBtn" class="add-btn" type="button" title="사람인 모집요강 표의 포지션 상세 칸에 붙여넣을 글만 복사해요 (모집 개요·공통 안내 제외)">포지션 상세만 복사</button>
           <button id="newPostingBtn" class="link-btn" type="button">새로 작성</button>
         </div>
         <span id="postTodo" class="manage-hint"></span>
         <p class="status" id="postStatus"></p>
+          <p id="copyDetailStatus" class="status"></p>
+          <textarea id="copyDetailShown" rows="8" readonly hidden aria-label="포지션 상세 (자동 복사가 안 될 때 직접 복사하세요)"></textarea>
+        <details id="saraminBox" class="rubric-box">
+          <summary>사람인 입력용 정리 (칸별 복사)</summary>
+          <p class="manage-hint">사람인 공고 등록 화면의 칸(경력·학력·근무형태·급여·근무일시·근무지역·자격요건·우대사항·포지션 상세)에 맞춰 값을 정리해요. 칸마다 복사 버튼이 있어요. 위에서 고친 내용(저장 전 포함)이 그대로 반영돼요.</p>
+          <button id="saraminRefreshBtn" class="add-btn" type="button">지금 내용으로 정리하기</button>
+          <p id="saraminStatus" class="status"></p>
+          <div id="saraminList" class="saramin-list"></div>
+        </details>
       </section>
 
       <section class="panel" style="margin-top: 24px;" data-menu="resume">
@@ -696,8 +707,9 @@
           </div>
           <div class="field"><label for="jdTplMgrTitle">이름</label><input id="jdTplMgrTitle" type="text" maxlength="40" readonly /></div>
           <div class="field"><label for="jdTplMgrKeywords">추천에 쓸 단어 (쉼표로 구분 · 포지션 이름에 이 단어가 들어 있으면 추천해요)</label><input id="jdTplMgrKeywords" type="text" readonly /></div>
+          <div class="field"><label for="jdTplMgrCareer">경력 추천값 (채울 때 위 "경력" 칸에 추천값으로 들어가요)</label><input id="jdTplMgrCareer" type="text" maxlength="40" list="careerOptions" readonly /></div>
           <div class="field"><label for="jdTplMgrBody">본문</label><textarea id="jdTplMgrBody" rows="14" readonly></textarea></div>
-          <p class="manage-hint">소제목 4개([이런 일을 함께해요] · [이런 분이었으면 좋겠어요] · [이런 경험이 있다면 더 좋아요] · [이런 분과 함께하고 싶어요])는 이름을 바꾸지 말고 순서도 지켜주세요. "[이런 분이었으면 좋겠어요]" 바로 아래 첫 줄은 "- 경력: …"으로 써주세요. 경력 연차는 추천값이라 채울 때 [추천] 표시가 붙어요.</p>
+          <p class="manage-hint">링크 공고처럼 맨 위에 <strong>포지션 소개 문장</strong>을 쓰고, 그 아래 소제목 3개(<strong>이런 일을 함께해요 · 이런 분이었으면 좋겠어요 · 이런 경험이 있다면 더 좋아요</strong>)를 대괄호 없이 이름 그대로 순서대로 써주세요. "이런 분이었으면 좋겠어요"의 <strong>첫 항목에는 경력 조건을 문장으로</strong> 써주세요(예: "- 뷰티 업계에서 3년 이상의 MD 경험이 있는 분"). 채울 때 그 줄에 [추천] 표시가 붙어서 확인하게 돼요. 소개 문장에는 <strong>{{team}}</strong>(팀 이름)과 <strong>{{brand}}</strong>(고른 브랜드, 없으면 비어요)를 쓸 수 있어요. 예: "{{brand}}{{team}} 소속으로 …합니다".</p>
           <div class="posting-actions">
             <button id="jdTplEditBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
             <button id="jdTplSaveBtn" class="add-btn" type="button" hidden>저장</button>
