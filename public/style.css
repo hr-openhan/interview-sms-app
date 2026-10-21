@@ -1855,3 +1855,22 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .sr-val { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 14px; max-width: 100%; }
 .sr-warn { color: #9a5b12; margin: 0; }
 .sr-shown { width: 100%; box-sizing: border-box; max-width: 100%; }
+
+/* 회사 정보 패널: 수정·저장·취소 버튼을 제목 줄 오른쪽 끝에 둠 (좁은 화면에서는 줄바꿈) */
+.head-with-actions { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }   /* 제목 글자와 버튼 글자가 같은 기준선에 오게 */
+.head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+#criteriaStatus:empty { display: none; }   /* 저장 안내가 없을 때는 빈 줄이 높이를 차지하지 않게 */
+
+/* 공고 만들기: 브랜드 바로 추가·삭제 */
+.brand-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: #fbf9f3; }
+.brand-quick-label { font-size: 13px; color: var(--muted, #6b6558); }
+.brand-quick-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.brand-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border: 1px solid var(--line); border-radius: 14px; background: #fff; font-size: 13.5px; }
+.brand-chip-x { border: 0; background: transparent; cursor: pointer; font-size: 12px; padding: 2px 6px; color: var(--danger, #b3402f); border-radius: 10px; }
+.brand-chip-x:hover { background: #f5e2df; }
+.brand-quick-add { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+.brand-quick-add input { width: 150px; max-width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font-size: 13.5px; font-family: inherit; }   /* .field 밖이라 앱 기본 입력칸 모양을 직접 지정 */
+.brand-quick-add input:focus { outline: none; border-color: var(--accent); background: #fff; }
+.brand-quick-add .add-btn { padding: 8px 14px; font-size: 13.5px; }
+.brand-quick .status { flex: 1 1 100%; margin: 0; }
+.brand-quick .status:empty { display: none; }

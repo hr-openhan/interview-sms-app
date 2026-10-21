@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-6">
+<html lang="ko" data-app-version="2026.10.21-9">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -278,10 +278,15 @@
 
     <div id="resumeView" class="resume-view">
       <section class="panel" data-menu="resume">
-        <div class="preview-head">
+        <div class="preview-head head-with-actions">
           <span class="preview-label">회사 정보 (사명 · 비전 / 공통 인재상)</span>
+          <div class="head-actions" id="criteriaActions">
+          <button id="editCriteriaBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
+          <button id="saveCriteriaBtn" class="add-btn" type="button" hidden>저장</button>
+          <button id="cancelCriteriaBtn" class="link-btn" type="button" hidden>취소</button>
+          <button id="resetCriteriaBtn" class="link-btn" type="button" hidden>처음 내용으로 되돌리기</button>
         </div>
-        <p class="manage-hint">공고 AI 초안과 이력서 평가가 참고해요. 아래 상자를 눌러 펼쳐 보세요. 평소에는 <strong>잠겨 있고</strong>, <strong>"수정"</strong>을 눌러 고친 뒤 <strong>"저장"</strong>해야 반영돼요.</p>
+        </div>
         <details id="companyBox" class="rubric-box">
           <summary>회사 소개 (사명 · 비전) 보기·수정</summary>
           <div class="field">
@@ -294,12 +299,6 @@
             <textarea id="idealProfileInput" rows="12" readonly aria-label="공통 인재상"></textarea>
           </div>
         </details>
-        <div class="posting-actions" id="criteriaActions">
-          <button id="editCriteriaBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
-          <button id="saveCriteriaBtn" class="add-btn" type="button" hidden>저장</button>
-          <button id="cancelCriteriaBtn" class="link-btn" type="button" hidden>취소</button>
-          <button id="resetCriteriaBtn" class="link-btn" type="button" hidden>처음 내용으로 되돌리기</button>
-        </div>
         <p class="status" id="criteriaStatus"></p>
 
         <details id="rubricBox" class="rubric-box">
@@ -555,6 +554,15 @@
           </div>
         </div>
         <p id="postBrandHint" class="manage-hint" hidden></p>
+        <div id="brandQuick" class="brand-quick" hidden>
+          <span class="brand-quick-label">이 팀의 브랜드 추가·삭제</span>
+          <span id="brandQuickChips" class="brand-quick-chips"></span>
+          <span class="brand-quick-add">
+            <input id="brandQuickInput" type="text" maxlength="40" placeholder="새 브랜드 이름" aria-label="새 브랜드 이름" autocomplete="off" />
+            <button id="brandQuickAddBtn" class="add-btn" type="button">＋ 추가</button>
+          </span>
+          <p id="brandQuickStatus" class="status"></p>
+        </div>
         <p id="postPositionHint" class="manage-hint">처음에는 직접 입력하세요. 한 번 만든 포지션은 다음부터 이 칸에서 골라 쓸 수 있어요.</p>
         <div class="field">
           <label for="postProfile">채용 유형 (평가표가 달라져요)</label>
@@ -709,7 +717,7 @@
           <div class="field"><label for="jdTplMgrKeywords">추천에 쓸 단어 (쉼표로 구분 · 포지션 이름에 이 단어가 들어 있으면 추천해요)</label><input id="jdTplMgrKeywords" type="text" readonly /></div>
           <div class="field"><label for="jdTplMgrCareer">경력 추천값 (채울 때 위 "경력" 칸에 추천값으로 들어가요)</label><input id="jdTplMgrCareer" type="text" maxlength="40" list="careerOptions" readonly /></div>
           <div class="field"><label for="jdTplMgrBody">본문</label><textarea id="jdTplMgrBody" rows="14" readonly></textarea></div>
-          <p class="manage-hint">링크 공고처럼 맨 위에 <strong>포지션 소개 문장</strong>을 쓰고, 그 아래 소제목 3개(<strong>이런 일을 함께해요 · 이런 분이었으면 좋겠어요 · 이런 경험이 있다면 더 좋아요</strong>)를 대괄호 없이 이름 그대로 순서대로 써주세요. "이런 분이었으면 좋겠어요"의 <strong>첫 항목에는 경력 조건을 문장으로</strong> 써주세요(예: "- 뷰티 업계에서 3년 이상의 MD 경험이 있는 분"). 채울 때 그 줄에 [추천] 표시가 붙어서 확인하게 돼요. 소개 문장에는 <strong>{{team}}</strong>(팀 이름)과 <strong>{{brand}}</strong>(고른 브랜드, 없으면 비어요)를 쓸 수 있어요. 예: "{{brand}}{{team}} 소속으로 …합니다".</p>
+          <p class="manage-hint">링크 공고처럼 맨 위에 <strong>포지션 소개 문장</strong>을 쓰고, 그 아래 소제목 3개(<strong>이런 일을 함께해요 · 이런 분이었으면 좋겠어요 · 이런 경험이 있다면 더 좋아요</strong>)를 대괄호 없이 이름 그대로 순서대로 써주세요. "이런 분이었으면 좋겠어요"의 <strong>첫 항목에는 경력 조건을 문장으로</strong> 써주세요(예: "- 뷰티 업계에서 3년 이상의 MD 경험이 있는 분"). 채울 때 그 줄에 [추천] 표시가 붙어서 확인하게 돼요. 소개 문장에는 <strong>{{team}}</strong>(팀 이름)과 <strong>{{brand}}</strong>(고른 브랜드, 없으면 비어요)를 쓸 수 있어요. 예: "{{team}}{{brand}} 소속으로 …합니다" → "그로잉업팀 아기동백 소속으로 …합니다".</p>
           <div class="posting-actions">
             <button id="jdTplEditBtn" class="link-btn" type="button" data-edit="resume">✏️ 수정</button>
             <button id="jdTplSaveBtn" class="add-btn" type="button" hidden>저장</button>

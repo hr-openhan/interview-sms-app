@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-6';
+const APP_VERSION = '2026.10.21-9';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -1940,6 +1940,7 @@ function brandListOf(text) { return [...new Set(String(text || '').split(/[,，�
 function currentBrand() { return postBrandMode.value === 'has' ? postBrand.value : ''; }
 // 팀을 바꾸거나 저장·불러오기 뒤에 호출: 선택지와 안내를 팀의 브랜드 목록에 맞춤. keep를 주면 그 브랜드를 선택해 둠(예: 저장된 공고를 열 때)
 function updateTeamBrandHint(keep) {
+  setTimeout(() => { if (typeof renderBrandQuick === 'function') renderBrandQuick(); }, 0);   // 팀·브랜드가 바뀔 때 아래 빠른 추가·삭제 칸도 같이 맞춰요
   const team = currentTeam();
   const list = team ? brandListOf(teamBrands[team]) : [];
   const want = keep !== undefined ? keep : currentBrand();
@@ -1955,11 +1956,67 @@ function updateTeamBrandHint(keep) {
   postBrandHint.hidden = false;
   postBrandHint.textContent = !options.length
     ? `${team}에는 등록된 브랜드가 없어요. 공통 공고로 만들어져요. (브랜드는 아래 "팀과 맡은 브랜드"에서 적어두면 여기서 고를 수 있어요)`
-    : postBrandMode.value === 'has' ? `${postBrand.value} 브랜드 공고예요. AI 초안이 맨 위 소개 문장에 "${postBrand.value} ○○팀 소속으로 …"처럼 브랜드 이름을 써요. JD 템플릿으로 채워도 소개 문장에 들어가요.` : '특정 브랜드가 없는 공통 공고예요. 브랜드가 있으면 "있음"을 고르세요.';
+    : postBrandMode.value === 'has' ? `${postBrand.value} 브랜드 공고예요. AI 초안이 맨 위 소개 문장에 "${team} ${postBrand.value} 소속으로 …"처럼 팀 이름 다음에 브랜드 이름을 써요. JD 템플릿으로 채워도 소개 문장에 들어가요.` : '특정 브랜드가 없는 공통 공고예요. 브랜드가 있으면 "있음"을 고르세요.';
   updatePositionHint();   // 브랜드가 바뀌면 "이미 만든 포지션이에요" 안내(같은 팀·포지션·브랜드 기준)도 다시 계산
 }
 postBrandMode.addEventListener('change', () => { postDirty = true; updateTeamBrandHint(postBrandMode.value === 'has' ? (postBrand.value || undefined) : ''); });
 postBrand.addEventListener('change', () => { postDirty = true; updateTeamBrandHint(postBrand.value); });   // (이 코드는 postDirty 선언 뒤라서 입력칸 목록(위쪽)에 넣지 않고 여기서 직접 켜요)
+// ---------- 공고 만들기에서 바로 브랜드 추가·삭제 ----------
+// 저장은 "팀과 맡은 브랜드"와 같은 PUT /api/team-brands(그 팀 하나만 보내면 서버가 합쳐요)를 써서 아래 패널과 항상 같은 데이터예요.
+const brandQuick = document.getElementById('brandQuick'), brandQuickChips = document.getElementById('brandQuickChips'), brandQuickInput = document.getElementById('brandQuickInput'), brandQuickStatus = document.getElementById('brandQuickStatus');
+function setQuickStatus(msg, cls) { brandQuickStatus.textContent = msg || ''; brandQuickStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+function renderBrandQuick() {
+  const team = currentTeam();
+  brandQuick.hidden = !team;
+  if (!team) { brandQuickChips.innerHTML = ''; return; }
+  const list = brandListOf(teamBrands[team]);
+  brandQuickChips.innerHTML = list.length
+    ? list.map(b => `<span class="brand-chip">${escapeHtml(b)}<button type="button" class="brand-chip-x" data-brand="${escapeHtml(b)}" aria-label="${escapeHtml(b)} 삭제">✕</button></span>`).join('')
+    : '<span class="manage-hint" style="margin:0">아직 없어요. 아래에 이름을 쓰고 추가하세요.</span>';
+}
+async function saveTeamBrandList(team, list) {
+  const res = await fetch('/api/team-brands', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brands: { [team]: list.join(', ') } }) });
+  const data = await res.json().catch(() => null);
+  if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+  if (!res.ok || !data.brands) throw new Error(data.error || '저장하지 못했어요.');
+  teamBrands = data.brands; renderBrands();
+}
+document.getElementById('brandQuickAddBtn').addEventListener('click', async () => {
+  const team = currentTeam(); if (!team) return;
+  if (brandEditing) { setQuickStatus('아래 "팀과 맡은 브랜드" 패널에서 수정 중이에요. 저장하거나 취소한 뒤 사용해주세요.', 'err'); return; }
+  const name = brandQuickInput.value.replace(/\s+/g, ' ').trim();
+  const list = brandListOf(teamBrands[team]);
+  if (!name) { setQuickStatus('추가할 브랜드 이름을 입력해주세요.', 'err'); brandQuickInput.focus(); return; }
+  if (/[,，、/·]/.test(name)) { setQuickStatus('쉼표(,)나 슬래시(/)는 쓸 수 없어요. 브랜드는 한 번에 하나씩 추가해주세요.', 'err'); return; }
+  if (list.some(b => b.toLowerCase() === name.toLowerCase())) { setQuickStatus(`"${name}"은(는) 이미 ${team}의 브랜드예요.`, 'err'); return; }
+  const next = [...list, name];
+  if (next.join(', ').length > 100) { setQuickStatus('한 팀의 브랜드는 이름을 합쳐서 100자 이내예요. 안 쓰는 브랜드를 지우고 다시 추가해주세요.', 'err'); return; }
+  const btn = document.getElementById('brandQuickAddBtn'); btn.disabled = true; setQuickStatus('');
+  try {
+    await saveTeamBrandList(team, next);
+    brandQuickInput.value = '';
+    updateTeamBrandHint(name);   // 방금 추가한 브랜드를 바로 골라 줘요(있음 + 그 브랜드)
+    postDirty = true;
+    setQuickStatus(`"${name}"을(를) ${team} 브랜드에 추가하고 이 공고의 브랜드로 골랐어요.`, 'ok');
+  } catch (err) { setQuickStatus(err.message || '추가하지 못했어요.', 'err'); }
+  finally { btn.disabled = false; }
+});
+brandQuickInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('brandQuickAddBtn').click(); } });
+brandQuickChips.addEventListener('click', async e => {
+  const x = e.target.closest('.brand-chip-x'); if (!x) return;
+  const team = currentTeam(); const name = x.dataset.brand; if (!team || !name) return;
+  if (brandEditing) { setQuickStatus('아래 "팀과 맡은 브랜드" 패널에서 수정 중이에요. 저장하거나 취소한 뒤 사용해주세요.', 'err'); return; }
+  if (!confirm(`"${name}"을(를) ${team}의 브랜드 목록에서 지울까요?\n이미 만든 공고에 적힌 브랜드는 그대로예요.`)) return;
+  try {
+    const wasSelected = currentBrand() === name;
+    await saveTeamBrandList(team, brandListOf(teamBrands[team]).filter(b => b !== name));
+    // 지금 고른 브랜드를 지웠는데, 이미 저장된 공고가 그 브랜드를 쓰는 중이면 그 공고는 그대로 유지하고(현재 목록에 없음 표시), 새 공고면 "없음"으로 돌려요
+    const keepForSaved = wasSelected && editingPosting && editingPosting.brand === name;
+    updateTeamBrandHint(wasSelected && !keepForSaved ? '' : undefined);
+    setQuickStatus(`"${name}"을(를) 지웠어요.${keepForSaved ? ' 이 공고에는 그대로 남아 있어요.' : ''}`, 'ok');
+  } catch (err) { setQuickStatus(err.message || '지우지 못했어요.', 'err'); }
+});
+
 async function loadBrands() {
   try {
     const res = await fetch('/api/team-brands');
@@ -2236,7 +2293,7 @@ document.getElementById('jdTplEditBtn').addEventListener('click', () => { jdMgrM
 document.getElementById('jdTplNewBtn').addEventListener('click', () => {
   jdMgrMode = 'new'; setJdMgrStatus('새 템플릿의 이름·단어·본문을 쓰고 저장하세요. 아래 본문은 소개 문장과 소제목 3개를 미리 넣어 둔 틀이에요.');
   jdMgrTitle.value = ''; jdMgrKeywords.value = ''; jdMgrCareer.value = '';
-  jdMgrBody.value = '{{brand}}{{team}} 소속으로 (이 포지션이 하는 일을 한두 문장으로 써주세요).\n이런 일을 함께해요\n- \n이런 분이었으면 좋겠어요\n- (경력 조건을 문장으로: 예) ○○ 경험이 3년 이상 있는 분)\n- \n이런 경험이 있다면 더 좋아요\n- ';
+  jdMgrBody.value = '{{team}}{{brand}} 소속으로 (이 포지션이 하는 일을 한두 문장으로 써주세요).\n이런 일을 함께해요\n- \n이런 분이었으면 좋겠어요\n- (경력 조건을 문장으로: 예) ○○ 경험이 3년 이상 있는 분)\n- \n이런 경험이 있다면 더 좋아요\n- ';
   jdMgrButtons(); autoGrow(jdMgrBody); jdMgrTitle.focus();
 });
 document.getElementById('jdTplCancelBtn').addEventListener('click', () => {
