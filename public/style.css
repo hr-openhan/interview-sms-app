@@ -1812,3 +1812,37 @@ details.help > summary::-webkit-details-marker { display: none; }
 details.help > summary::before { content: "▸ "; }
 details.help[open] > summary::before { content: "▾ "; }
 details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--line); font-size: 12px; }
+
+/* 팀 옆의 브랜드 선택: 평소엔 "없음 (공통)", "있음"을 고르면 브랜드 고르는 칸이 나타나요 */
+.post-brand-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.post-brand-row select { flex: 1 1 110px; min-width: 0; max-width: 100%; }
+.post-brand-field { min-width: 0; }
+
+/* JD 템플릿: 추천·채우기 박스, 보기·수정 패널 */
+.jdtpl-box { margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbf9f3; }
+.jdtpl-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.jdtpl-rec { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.jdtpl-rec .rec-btn { font-size: 13px; padding: 4px 10px; max-width: 100%; white-space: normal; text-align: left; }
+.jdtpl-rec .rec-label { font-size: 12px; color: var(--muted, #6b6558); align-self: center; }
+.jdtpl-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+.jdtpl-pick select { flex: 1 1 200px; min-width: 0; max-width: 100%; }
+#jdTplMgrBox input[readonly], #jdTplMgrBox textarea[readonly] { background: #f4f1e9; cursor: default; }
+#jdTplMgrBox textarea, #jdTplMgrBox input, #jdTplMgrSelect { width: 100%; box-sizing: border-box; max-width: 100%; }
+#jdTplMgrBody { overflow: hidden; resize: none; }
+
+/* API 없이 평가하기: 직접 채점 · Claude 채팅에 붙여넣기 */
+.noapi-box { padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; background: #fbf9f3; }
+.manual-rows { display: grid; gap: 10px; margin-bottom: 10px; }
+.manual-row { padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+.manual-row .mr-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.manual-row .mr-head strong { font-size: 14px; }
+.manual-row .mr-max { font-size: 12px; color: var(--muted, #6b6558); }
+.manual-row .mr-inputs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.manual-row input[type="number"] { width: 84px; }
+.manual-row input.mr-comment { flex: 1 1 200px; min-width: 0; }
+.manual-row .mr-quick { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.manual-row .mr-quick button { font-size: 12px; padding: 2px 8px; }
+.manual-row details.help { margin: 4px 0 0; }
+.manual-cand { display: grid; gap: 6px; padding-top: 6px; }
+.manual-cand input { width: 100%; box-sizing: border-box; max-width: 100%; }
+#pasteBox textarea, #manualBox textarea { width: 100%; box-sizing: border-box; max-width: 100%; }

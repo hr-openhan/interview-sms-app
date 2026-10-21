@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-2';
+const APP_VERSION = '2026.10.21-5';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -1422,6 +1422,7 @@ function renderRubricTable() {
   const rs = criteriaState.rubrics || { experienced: criteriaState.rubric, junior: [] };
   rubricBody.innerHTML = rubricRows(rs.experienced);
   document.getElementById('rubricBodyJunior').innerHTML = rubricRows(rs.junior);
+  document.getElementById('rubricBodyFashion').innerHTML = rubricRows(rs.fashion || []);
 }
 
 // 사명·인재상: 보기만 해요. (서버의 수정 기능은 남겨 두었고, 필요하면 나중에 따로 화면을 붙일 수 있어요)
@@ -1571,7 +1572,7 @@ function fmtDate(iso) {
 }
 function conditionText(p) {
   return [p.workplace || '근무지 미정', p.employmentType || '형태 미정', p.months ? p.months + '개월' : '기간 미정',
-    p.profile === 'junior' ? '신입직' : '', p.applyEnd ? '접수 ~' + p.applyEnd.slice(5).replace('-', '.') : ''].filter(Boolean).join(' · ');
+    ({ junior: '신입직', fashion: '패션 직무형' })[p.profile] || '', p.applyEnd ? '접수 ~' + p.applyEnd.slice(5).replace('-', '.') : ''].filter(Boolean).join(' · ');
 }
 // 팀: 면접 일정의 팀 중에서만 고름. (예전 공고에만 있던 팀의 공고를 고칠 때는 그 팀이 임시로 선택지에 보임)
 function currentTeam() { return postTeam.value; }
@@ -1633,11 +1634,19 @@ function positionsOfTeam(team) {
   postingsAll.filter(p => p.team === team).forEach(p => { if (!seen.has(p.position)) { seen.add(p.position); out.push(p.position); } });
   return out;
 }
+// 추천 목록용: 같은 팀에서 만든 포지션을 먼저, 이어서 다른 팀에서 쓴 포지션(디자이너·MD·회계처럼 여러 팀에서 반복되는 이름)을 중복 없이 이어 붙임
+function positionSuggestions(team) {
+  const own = positionsOfTeam(team);
+  const seen = new Set(own);
+  const others = [];
+  postingsAll.forEach(p => { if (p.team !== team && p.position && !seen.has(p.position)) { seen.add(p.position); others.push(p.position); } });
+  return [...own, ...others];
+}
 function renderPositionList() {
   const team = currentTeam();
   postPosition.disabled = !team;
   postPosition.placeholder = team ? '직접 입력하거나 목록에서 고르세요' : '팀을 먼저 골라주세요';
-  const names = team ? positionsOfTeam(team) : [];
+  const names = team ? positionSuggestions(team) : [];
   postPositionList.innerHTML = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
   updatePositionHint();
 }
@@ -1645,7 +1654,8 @@ function matchingPostings() {
   const team = currentTeam();
   const pos = postPosition.value.replace(/\s+/g, ' ').trim();
   if (!team || !pos) return [];
-  return postingsAll.filter(p => p.team === team && p.position === pos);
+  const brand = currentBrand();
+  return postingsAll.filter(p => p.team === team && p.position === pos && (p.brand || '') === brand);   // 브랜드가 다르면 다른 공고
 }
 function updatePositionHint() {
   const team = currentTeam();
@@ -1669,7 +1679,7 @@ function renderEvalOptions() {
   const teams = [...new Set(confirmed.map(p => p.team))].sort((x, y) => teamRank(x) - teamRank(y) || x.localeCompare(y));
   evalPositionSelect.innerHTML = '<option value="">평가할 공고를 선택하세요</option>' + teams.map(t =>
     `<optgroup label="${escapeHtml(t)}">${confirmed.filter(p => p.team === t)
-      .map(p => `<option value="${escapeHtml(p.id)}">${fmtDate(p.createdAt)} · ${escapeHtml(p.position)}</option>`).join('')}</optgroup>`).join('');
+      .map(p => `<option value="${escapeHtml(p.id)}">${fmtDate(p.createdAt)} · ${escapeHtml(p.position)}${p.brand ? ` [${escapeHtml(p.brand)}]` : ''}</option>`).join('')}</optgroup>`).join('');
   if (confirmed.some(p => p.id === keep)) evalPositionSelect.value = keep;
 }
 
@@ -1684,7 +1694,7 @@ function renderPostingList() {
     <tr data-id="${escapeHtml(p.id)}">
       <td data-label="생성일">${fmtDate(p.createdAt)}</td>
       <td data-label="팀">${escapeHtml(p.team)}</td>
-      <td data-label="포지션"><strong>${escapeHtml(p.position)}</strong><div class="manage-hint" style="margin:2px 0 0">${escapeHtml(p.jdPreview)}</div></td>
+      <td data-label="포지션"><strong>${escapeHtml(p.position)}</strong>${p.brand ? ` <span class="notion-tag">${escapeHtml(p.brand)}</span>` : ''}<div class="manage-hint" style="margin:2px 0 0">${escapeHtml(p.jdPreview)}</div></td>
       <td data-label="근무 조건">${escapeHtml(conditionText(p))}</td>
       <td data-label="상태"><span class="notion-tag${p.status === 'confirmed' ? ' tag-ok' : ''}">${p.status === 'confirmed' ? '확정' : '작성 중'}</span>${p.confirmedAt ? `<div class="manage-hint" style="margin:2px 0 0">확정 ${fmtDate(p.confirmedAt)}</div>` : ''}</td>
       <td class="posting-row-actions">
@@ -1743,7 +1753,7 @@ function applyDefaultsToForm() {
 }
 let resumeDataReady = false;
 async function loadResumeData() {
-  await Promise.all([loadCriteria(), loadPostings(), loadPostingDefaults()]);
+  await Promise.all([loadCriteria(), loadPostings(), loadPostingDefaults(), loadJdTemplates()]);
   if (!brandEditing) { renderBrands(); updateTeamBrandHint(); }   // 팀 목록이 채워진 뒤에 브랜드 표를 확실히 다시 그림
   if (!resumeDataReady) { resumeDataReady = true; if (!postDirty && !editingPosting) applyDefaultsToForm(); }
 }
@@ -1776,7 +1786,7 @@ postApplyStart.addEventListener('change', () => {
   if (!applyEndTouched && postApplyStart.value) postApplyEnd.value = addMonthsStr(postApplyStart.value, postingDefaults.applyMonths || 2);
 });
 function onTeamChanged() {
-  updateTeamBrandHint();
+  updateTeamBrandHint('');   // 팀을 바꾸면 브랜드는 "없음(공통)"으로 되돌려요(이전 팀의 브랜드가 따라가지 않게)
   renderPositionList();
   if (!editingPosting) postWorkplace.value = workplaceForTeam(currentTeam()); // 팀마다 다른 기본 근무지
   updateWorkplaceHint();
@@ -1791,12 +1801,13 @@ postPosition.addEventListener('change', updatePositionHint);
 function fillEditor(p) {
   setTimeout(runPostCheck, 0);   // 불러온 공고도 바로 점검
   setTeamValue(p.team);
+  updateTeamBrandHint(p.brand || '');   // 저장된 공고의 브랜드를 그대로 보여줌(팀 목록에서 빠졌어도 이 공고에는 남아 있어요)
   renderPositionList();
   postPosition.value = p.position;
   postWorkplace.value = p.workplace || '';
   postType.value = postTypes.includes(p.employmentType) ? p.employmentType : '';
   postMonths.value = p.months || '';
-  postProfile.value = p.profile === 'junior' ? 'junior' : 'experienced';
+  postProfile.value = ['junior', 'fashion'].includes(p.profile) ? p.profile : 'experienced';
   postApplyStart.value = p.applyStart || '';
   postApplyEnd.value = p.applyEnd || '';
   applyEndTouched = true;
@@ -1814,11 +1825,13 @@ function confirmDiscard() {
 function resetEditor() {
   editingPosting = null;
   setTeamValue('');
+  updateTeamBrandHint('');
   renderPositionList();
   postPosition.value = '';
   postJd.value = '';
   postNotes.value = '';
   postCheckSeq++; clearTimeout(postCheckTimer); runPostCheck();   // 새 공고에 이전 공고의 점검 결과가 남지 않게(빈 글이면 처음 안내로 돌아가요)
+  jdTplSelect.value = ''; setJdTplStatus(''); jdTplRec.hidden = true; jdTplRec.innerHTML = '';   // JD 템플릿 박스도 처음 상태로(이전 공고의 템플릿 선택·"채웠어요" 안내가 남지 않게)
   variantBox.hidden = true; variantsState = []; variantEdited = false;
   applyDefaultsToForm();
   loadTeamRef();
@@ -1913,13 +1926,36 @@ function renderBrands() {
   document.getElementById('saveBrandBtn').hidden = !brandEditing;
   document.getElementById('cancelBrandBtn').hidden = !brandEditing;
 }
-function updateTeamBrandHint() {
-  const el = document.getElementById('postTeamBrand');
-  const t = currentTeam();
-  const b = t ? (teamBrands[t] || '').trim() : '';
-  el.hidden = !b;
-  el.textContent = b ? `${t}이 맡은 브랜드: ${b} (AI 공고 초안이 참고해요)` : '';
+// ---------- 브랜드 선택 (팀 옆: 없음(공통) / 있음) ----------
+// 없음(공통)이면 특정 브랜드가 없는 공고로 봐요. 있음이면 그 팀이 맡은 브랜드 중에서 고르고, 고른 브랜드만 AI 초안에 전달돼요.
+const postBrandMode = document.getElementById('postBrandMode');
+const postBrand = document.getElementById('postBrand');
+const postBrandHint = document.getElementById('postBrandHint');
+// 서버의 brandListOf와 같은 규칙으로 팀의 브랜드 글을 목록으로 나눔
+function brandListOf(text) { return [...new Set(String(text || '').split(/[,，、/·\n]+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean))]; }
+function currentBrand() { return postBrandMode.value === 'has' ? postBrand.value : ''; }
+// 팀을 바꾸거나 저장·불러오기 뒤에 호출: 선택지와 안내를 팀의 브랜드 목록에 맞춤. keep를 주면 그 브랜드를 선택해 둠(예: 저장된 공고를 열 때)
+function updateTeamBrandHint(keep) {
+  const team = currentTeam();
+  const list = team ? brandListOf(teamBrands[team]) : [];
+  const want = keep !== undefined ? keep : currentBrand();
+  const savedOnly = want && !list.includes(want);        // 팀 목록에서 빠졌지만 이 공고에는 저장돼 있는 브랜드
+  const options = savedOnly ? [...list, want] : list;
+  postBrand.innerHTML = options.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}${savedOnly && b === want ? ' (현재 목록에 없음)' : ''}</option>`).join('');
+  const hasOption = postBrandMode.querySelector('option[value="has"]');
+  hasOption.disabled = !options.length;
+  if (want && options.includes(want)) { postBrandMode.value = 'has'; postBrand.value = want; }
+  else postBrandMode.value = 'none';
+  postBrand.hidden = postBrandMode.value !== 'has';
+  if (!team) { postBrandHint.hidden = true; postBrandHint.textContent = ''; if (typeof updatePositionHint === 'function') updatePositionHint(); return; }
+  postBrandHint.hidden = false;
+  postBrandHint.textContent = !options.length
+    ? `${team}에는 등록된 브랜드가 없어요. 공통 공고로 만들어져요. (브랜드는 아래 "팀과 맡은 브랜드"에서 적어두면 여기서 고를 수 있어요)`
+    : postBrandMode.value === 'has' ? `${postBrand.value} 브랜드 공고예요. AI 초안이 이 브랜드를 참고하고 모집 개요에 브랜드가 적혀요.` : '특정 브랜드가 없는 공통 공고예요. 브랜드가 있으면 "있음"을 고르세요.';
+  updatePositionHint();   // 브랜드가 바뀌면 "이미 만든 포지션이에요" 안내(같은 팀·포지션·브랜드 기준)도 다시 계산
 }
+postBrandMode.addEventListener('change', () => { postDirty = true; updateTeamBrandHint(postBrandMode.value === 'has' ? (postBrand.value || undefined) : ''); });
+postBrand.addEventListener('change', () => { postDirty = true; updateTeamBrandHint(postBrand.value); });   // (이 코드는 postDirty 선언 뒤라서 입력칸 목록(위쪽)에 넣지 않고 여기서 직접 켜요)
 async function loadBrands() {
   try {
     const res = await fetch('/api/team-brands');
@@ -2004,6 +2040,7 @@ document.getElementById('resetTeamRefBtn').addEventListener('click', async () =>
 function collectPosting() {
   return {
     team: currentTeam(),
+    brand: currentBrand(),
     position: postPosition.value,
     workplace: postWorkplace.value,
     employmentType: postType.value,
@@ -2037,7 +2074,7 @@ draftJdBtn.addEventListener('click', async () => {
     const c = collectPosting();
     const res = await fetch('/api/postings/draft', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ team: c.team, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, profile: c.profile, portfolio: postPortfolio.checked, variants: 3, notes: postNotes.value, baseJd }),
+      body: JSON.stringify({ team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, profile: c.profile, portfolio: postPortfolio.checked, variants: 3, notes: postNotes.value, baseJd }),
     });
     const data = await res.json().catch(() => null);
     if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
@@ -2095,7 +2132,7 @@ function renderImportItems() {
         <label class="check-chip"><input type="checkbox" class="import-use" checked /> 저장</label>
         <select class="import-team" aria-label="팀"><option value="">팀 선택</option>${postTeams.map(t => `<option value="${escapeHtml(t)}"${t === it.team ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select>
         <input type="text" class="import-pos" maxlength="${POSTING_POSITION_MAX}" value="${escapeHtml(it.position)}" placeholder="포지션 이름" aria-label="포지션" />
-        <select class="import-profile" aria-label="채용 유형"><option value="experienced"${it.profile === 'junior' ? '' : ' selected'}>경력직</option><option value="junior"${it.profile === 'junior' ? ' selected' : ''}>신입직</option></select>
+        <select class="import-profile" aria-label="채용 유형"><option value="experienced"${['junior', 'fashion'].includes(it.profile) ? '' : ' selected'}>경력직</option><option value="junior"${it.profile === 'junior' ? ' selected' : ''}>신입직</option><option value="fashion"${it.profile === 'fashion' ? ' selected' : ''}>패션 직무형</option></select>
       </div>
       <textarea class="import-body" rows="6" aria-label="공고 내용">${escapeHtml(it.body)}</textarea>
       ${notes.join('')}
@@ -2154,6 +2191,145 @@ document.getElementById('importSaveBtn').addEventListener('click', async () => {
     document.getElementById('postingBody').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) { setImportStatus(err.message || '저장 중 오류가 발생했어요.', 'err'); }
   finally { btn.disabled = false; }
+});
+
+// ---------- JD 템플릿 (AI 없이 본문 채우기) ----------
+const jdTplSelect = document.getElementById('jdTplSelect');
+const jdTplRec = document.getElementById('jdTplRec');
+const jdTplStatus = document.getElementById('jdTplStatus');
+let jdTemplates = [];
+let jdRecSeq = 0, jdRecTimer = null;
+function setJdTplStatus(msg, cls) { jdTplStatus.textContent = msg || ''; jdTplStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+function renderJdTplSelect(keep) {
+  const cur = keep !== undefined ? keep : jdTplSelect.value;
+  jdTplSelect.innerHTML = '<option value="">템플릿을 골라주세요</option>' + jdTemplates.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}${t.isDefault ? '' : ' (직접 추가)'}${t.edited ? ' (수정됨)' : ''}</option>`).join('');
+  if (jdTemplates.some(t => t.id === cur)) jdTplSelect.value = cur;
+}
+async function loadJdTemplates() {
+  try {
+    const res = await fetch('/api/jd-templates'); const data = await res.json();
+    if (!res.ok || !data.templates) throw new Error(data.error || '불러오기 실패');
+    jdTemplates = data.templates; renderJdTplSelect(); renderJdTplMgr(); refreshJdRecommend();
+  } catch (err) { setJdTplStatus('템플릿을 불러오지 못했어요: ' + (err.message || ''), 'err'); }
+}
+// 팀·포지션을 바꾸고 잠깐 멈추면 어울리는 템플릿을 추천 (포지션 이름에 맞는 단어가 있을 때만)
+async function refreshJdRecommend() {
+  const seq = ++jdRecSeq; const team = currentTeam(); const position = postPosition.value.trim();
+  if (!team || !position) { jdTplRec.hidden = true; jdTplRec.innerHTML = ''; return; }
+  try {
+    const res = await fetch(`/api/jd-templates/recommend?team=${encodeURIComponent(team)}&position=${encodeURIComponent(position)}`); const data = await res.json();
+    if (seq !== jdRecSeq || !res.ok) return;
+    const list = data.recommended || [];
+    if (!list.length) { jdTplRec.hidden = true; jdTplRec.innerHTML = ''; return; }
+    jdTplRec.hidden = false;
+    jdTplRec.innerHTML = '<span class="rec-label">추천:</span>' + list.map((r, i) => `<button type="button" class="${i === 0 ? 'add-btn' : 'link-btn'} rec-btn" data-id="${escapeHtml(r.id)}">${escapeHtml(r.title)} 로 채우기</button>`).join('');
+  } catch { /* 추천을 못 받아도 아래에서 직접 고를 수 있어요 */ }
+}
+function scheduleJdRecommend() { clearTimeout(jdRecTimer); jdRecTimer = setTimeout(refreshJdRecommend, 400); }
+async function fillFromTemplate(id) {
+  if (!requireTeamAndPosition()) return;
+  if (!id) { setJdTplStatus('채울 템플릿을 먼저 골라주세요.', 'err'); return; }
+  if (postJd.value.trim() && !confirm('지금 써 둔 공고문이 있어요.\n템플릿 내용으로 바꿀까요? 쓰던 내용은 사라져요.\n\n[취소]를 누르면 아무것도 바뀌지 않아요.')) return;
+  const c = collectPosting();
+  try {
+    const res = await fetch('/api/postings/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId: id, team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, portfolio: postPortfolio.checked }) });
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error('서버가 응답하지 못했어요.');
+    if (!res.ok) throw new Error(data.error || '채우기 실패');
+    postJd.value = data.jd; postDirty = true; variantEdited = false; variantBox.hidden = true; variantsState = [];
+    updatePostTodo(); runPostCheck();
+    setJdTplStatus(`"${data.title}" 템플릿으로 채웠어요. ${data.recommended ? '경력 연차는 추천값이에요([추천] 표시) — 확인하고 고쳐주세요. ' : ''}${data.placeholders ? `[입력] ${data.placeholders}곳은 직접 채워주세요.` : ''}`, 'ok');
+  } catch (err) { setJdTplStatus(err.message || '채우는 중 오류가 발생했어요.', 'err'); }
+}
+document.getElementById('jdTplFillBtn').addEventListener('click', () => fillFromTemplate(jdTplSelect.value));
+jdTplRec.addEventListener('click', e => { const b = e.target.closest('.rec-btn'); if (b) { jdTplSelect.value = b.dataset.id; fillFromTemplate(b.dataset.id); } });
+postPosition.addEventListener('input', scheduleJdRecommend);
+postTeam.addEventListener('change', scheduleJdRecommend);
+
+// ---------- JD 템플릿 보기·수정 (평소엔 잠금, 수정 → 저장/취소) ----------
+const jdMgrSel = document.getElementById('jdTplMgrSelect');
+const jdMgrTitle = document.getElementById('jdTplMgrTitle');
+const jdMgrKeywords = document.getElementById('jdTplMgrKeywords');
+const jdMgrBody = document.getElementById('jdTplMgrBody');
+const jdMgrStatus = document.getElementById('jdTplMgrStatus');
+let jdMgrMode = 'view';   // view | edit | new
+function setJdMgrStatus(msg, cls) { jdMgrStatus.textContent = msg || ''; jdMgrStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+function jdMgrCurrent() { return jdTemplates.find(t => t.id === jdMgrSel.value) || null; }
+function jdMgrButtons() {
+  const t = jdMgrMode === 'new' ? null : jdMgrCurrent(); const editing = jdMgrMode !== 'view';
+  document.getElementById('jdTplEditBtn').hidden = editing || !t;
+  document.getElementById('jdTplSaveBtn').hidden = !editing;
+  document.getElementById('jdTplCancelBtn').hidden = !editing;
+  document.getElementById('jdTplResetBtn').hidden = !(jdMgrMode === 'edit' && t && t.isDefault && t.edited);
+  document.getElementById('jdTplDeleteBtn').hidden = !(jdMgrMode === 'edit' && t && !t.isDefault);
+  document.getElementById('jdTplNewBtn').hidden = editing;
+  jdMgrSel.disabled = editing;
+  [jdMgrTitle, jdMgrKeywords, jdMgrBody].forEach(el => { el.readOnly = !editing; });
+}
+function jdMgrFill() {
+  const t = jdMgrCurrent();
+  jdMgrTitle.value = t ? t.title : ''; jdMgrKeywords.value = t ? (t.keywords || []).join(', ') : ''; jdMgrBody.value = t ? t.body : '';
+  jdMgrButtons(); autoGrow(jdMgrBody);
+}
+function renderJdTplMgr(keep) {
+  const cur = keep !== undefined ? keep : jdMgrSel.value;
+  jdMgrSel.innerHTML = jdTemplates.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}${t.isDefault ? '' : ' (직접 추가)'}${t.edited ? ' (수정됨)' : ''}</option>`).join('');
+  if (jdTemplates.some(t => t.id === cur)) jdMgrSel.value = cur;
+  if (jdMgrMode === 'view') jdMgrFill();
+}
+function jdMgrDirty() {
+  if (jdMgrMode === 'new') return !!(jdMgrTitle.value.trim() || jdMgrKeywords.value.trim() || jdMgrBody.value.trim());
+  const t = jdMgrCurrent(); if (!t) return false;
+  return jdMgrTitle.value !== t.title || jdMgrKeywords.value !== (t.keywords || []).join(', ') || jdMgrBody.value !== t.body;
+}
+jdMgrSel.addEventListener('change', jdMgrFill);
+jdMgrBody.addEventListener('input', () => autoGrow(jdMgrBody));
+document.getElementById('jdTplMgrBox').addEventListener('toggle', e => { if (e.target.open) autoGrow(jdMgrBody); });
+document.getElementById('jdTplEditBtn').addEventListener('click', () => { jdMgrMode = 'edit'; setJdMgrStatus(''); jdMgrButtons(); jdMgrTitle.focus(); });
+document.getElementById('jdTplNewBtn').addEventListener('click', () => {
+  jdMgrMode = 'new'; setJdMgrStatus('새 템플릿의 이름·단어·본문을 쓰고 저장하세요. 아래 본문은 소제목 4개를 미리 넣어 둔 틀이에요.');
+  jdMgrTitle.value = ''; jdMgrKeywords.value = '';
+  jdMgrBody.value = '[이런 일을 함께해요]\n- \n\n[이런 분이었으면 좋겠어요]\n- 경력: \n- \n\n[이런 경험이 있다면 더 좋아요]\n- \n\n[이런 분과 함께하고 싶어요]\n[입력]';
+  jdMgrButtons(); autoGrow(jdMgrBody); jdMgrTitle.focus();
+});
+document.getElementById('jdTplCancelBtn').addEventListener('click', () => {
+  if (jdMgrDirty() && !confirm('고친 내용을 저장하지 않고 닫을까요?')) return;
+  jdMgrMode = 'view'; setJdMgrStatus(''); jdMgrFill();
+});
+document.getElementById('jdTplSaveBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('jdTplSaveBtn'); btn.disabled = true;
+  const body = { title: jdMgrTitle.value, keywords: jdMgrKeywords.value, body: jdMgrBody.value };
+  try {
+    const isNew = jdMgrMode === 'new';
+    const res = await fetch(isNew ? '/api/jd-templates' : '/api/jd-templates/' + encodeURIComponent(jdMgrSel.value), { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => null);
+    if (!data || !res.ok) throw new Error((data && data.error) || '저장하지 못했어요.');
+    jdMgrMode = 'view';
+    const r = await fetch('/api/jd-templates'); const list = await r.json(); jdTemplates = list.templates || jdTemplates;
+    renderJdTplSelect(); renderJdTplMgr(data.template.id); refreshJdRecommend();
+    setJdMgrStatus(isNew ? '새 템플릿을 추가했어요. 다음부터 포지션 이름에 맞으면 추천돼요.' : '저장했어요. 다음에 채우는 공고부터 반영돼요.', 'ok');
+  } catch (err) { setJdMgrStatus(err.message || '저장 중 오류가 발생했어요.', 'err'); }
+  finally { btn.disabled = false; }
+});
+document.getElementById('jdTplResetBtn').addEventListener('click', async () => {
+  const t = jdMgrCurrent(); if (!t) return;
+  if (!confirm(`"${t.title}"을(를) 처음 내용으로 되돌릴까요?\n고친 내용은 사라져요.`)) return;
+  try {
+    const res = await fetch(`/api/jd-templates/${encodeURIComponent(t.id)}/reset`, { method: 'POST' }); const data = await res.json().catch(() => null);
+    if (!data || !res.ok) throw new Error((data && data.error) || '되돌리지 못했어요.');
+    jdMgrMode = 'view'; const r = await fetch('/api/jd-templates'); jdTemplates = (await r.json()).templates || jdTemplates;
+    renderJdTplSelect(); renderJdTplMgr(t.id); refreshJdRecommend(); setJdMgrStatus('처음 내용으로 되돌렸어요.', 'ok');
+  } catch (err) { setJdMgrStatus(err.message || '되돌리는 중 오류가 발생했어요.', 'err'); }
+});
+document.getElementById('jdTplDeleteBtn').addEventListener('click', async () => {
+  const t = jdMgrCurrent(); if (!t || t.isDefault) return;
+  if (!confirm(`"${t.title}" 템플릿을 삭제할까요?\n이미 이 템플릿으로 만든 공고는 그대로예요.`)) return;
+  try {
+    const res = await fetch('/api/jd-templates/' + encodeURIComponent(t.id), { method: 'DELETE' }); const data = await res.json().catch(() => null);
+    if (!data || !res.ok) throw new Error((data && data.error) || '삭제하지 못했어요.');
+    jdMgrMode = 'view'; const r = await fetch('/api/jd-templates'); jdTemplates = (await r.json()).templates || jdTemplates;
+    renderJdTplSelect(); renderJdTplMgr(jdTemplates[0] && jdTemplates[0].id); refreshJdRecommend(); setJdMgrStatus('삭제했어요.', 'ok');
+  } catch (err) { setJdMgrStatus(err.message || '삭제 중 오류가 발생했어요.', 'err'); }
 });
 
 // ---------- 공고 점검 (서버의 규칙 기반 점검 결과를 보여줌 / AI를 쓰지 않아 비용이 들지 않아요) ----------
@@ -2439,6 +2615,11 @@ document.querySelectorAll('input[name="resumeMode"]').forEach(r => r.addEventLis
   pdfBox.hidden = mode !== 'pdf';
   textBox.hidden = mode !== 'text';
   document.getElementById('notionPickBox').hidden = mode !== 'notion';
+  document.getElementById('manualBox').hidden = mode !== 'manual';
+  document.getElementById('pasteBox').hidden = mode !== 'paste';
+  usePeersEl.closest('label').hidden = mode === 'manual';        // 직접 채점은 AI를 쓰지 않아서 합격자 참고 설정이 필요 없어요
+  screenResumeBtn.hidden = mode === 'manual' || mode === 'paste'; // AI를 부르는 "평가하기" 버튼은 AI 없는 방법에서는 숨김
+  if (mode === 'manual') renderManualRows();
   resumeStatus.textContent = '';
 }));
 resumeFile.addEventListener('change', () => { if (resumeFile.files[0]) setPdf(resumeFile.files[0]); });
@@ -2450,6 +2631,106 @@ pdfDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) setPdf(e.da
 async function readJsonOrNull(res) {
   try { return await res.json(); } catch { return null; }
 }
+
+// ---------- API 없이 평가하기 ----------
+// 직접 채점: 평가표를 보며 사람이 점수를 넣으면 서버가 AI 평가와 같은 모양의 결과를 계산해요. 붙여넣기: Claude 채팅으로 평가하고 답을 붙여넣어요.
+const manualRows = document.getElementById('manualRows');
+function evalPosting() { return postingsAll.find(p => p.id === evalPositionSelect.value) || null; }
+function manualRubric() {
+  const p = evalPosting(); if (!p) return [];
+  const rs = criteriaState.rubrics || {};
+  return rs[['junior', 'fashion'].includes(p.profile) ? p.profile : 'experienced'] || [];
+}
+// 평가 기준 글 "S(30): … / A(24): …"에서 S·A·B·C 점수를 읽어 빠른 입력 버튼을 만듦 (평가표가 바뀌어도 자동으로 맞아요)
+function gradePoints(criteria) {
+  const out = []; const seen = new Set(); const re = /([SABC])\((\d+)(?:\s*이하)?\)/g; let m;   // "C(12 이하)"처럼 이하가 붙은 기준도 읽어요
+  while ((m = re.exec(String(criteria || '')))) { if (seen.has(m[1])) continue; seen.add(m[1]); out.push({ g: m[1], v: Number(m[2]) }); }   // 설명 문장 속의 "A(8)" 같은 같은 등급은 처음 것만
+  return out;
+}
+function renderManualRows() {
+  const p = evalPosting(); const rubric = manualRubric();
+  if (!p) { manualRows.innerHTML = '<p class="manage-hint">먼저 위에서 평가할 공고를 골라주세요. 공고의 평가표대로 점수 칸이 나와요.</p>'; return; }
+  manualRows.innerHTML = rubric.map(r => `
+    <div class="manual-row" data-key="${escapeHtml(r.key)}" data-max="${r.max}">
+      <div class="mr-head"><strong>${escapeHtml(r.area)}</strong><span class="mr-max">${escapeHtml(r.item)} · 배점 ${r.max}점</span></div>
+      <div class="mr-inputs">
+        <input type="number" class="mr-score" min="0" max="${r.max}" step="1" inputmode="numeric" aria-label="${escapeHtml(r.area)} 점수 (0~${r.max})" placeholder="0~${r.max}" />
+        <span class="mr-quick">${gradePoints(r.criteria).map(x => `<button type="button" class="link-btn" data-v="${x.v}">${x.g} ${x.v}</button>`).join('')}</span>
+        <input type="text" class="mr-comment" maxlength="400" placeholder="점수를 준 근거 한 줄 (선택)" aria-label="${escapeHtml(r.area)} 근거" />
+      </div>
+      <details class="help"><summary>평가 기준 보기</summary><p class="manage-hint">${escapeHtml(r.criteria)}</p></details>
+    </div>`).join('') + `<p class="manage-hint" id="manualTotal"></p>`;
+  updateManualTotal();
+}
+function updateManualTotal() {
+  const el = document.getElementById('manualTotal'); if (!el) return;
+  const rows = [...manualRows.querySelectorAll('.manual-row')]; const filled = rows.filter(r => r.querySelector('.mr-score').value !== '');
+  const sum = filled.reduce((s, r) => s + (Number(r.querySelector('.mr-score').value) || 0), 0);
+  el.textContent = filled.length ? `입력한 점수 합계 ${sum}점 (${filled.length}/${rows.length}개 영역) — 정확한 총점과 검토 우선순위는 "점수 계산하기"에서 계산해요.` : '';
+}
+manualRows.addEventListener('input', updateManualTotal);
+manualRows.addEventListener('click', e => {
+  const b = e.target.closest('.mr-quick button'); if (!b) return;
+  b.closest('.manual-row').querySelector('.mr-score').value = b.dataset.v; updateManualTotal();
+});
+evalPositionSelect.addEventListener('change', () => { if (resumeMode() === 'manual') renderManualRows(); });
+document.getElementById('manualScoreBtn').addEventListener('click', async () => {
+  if (!evalPositionSelect.value) { resumeStatus.textContent = '평가할 공고를 먼저 선택해주세요.'; resumeStatus.className = 'status err'; return; }
+  const scores = {}, comments = {};
+  for (const row of manualRows.querySelectorAll('.manual-row')) {
+    const v = row.querySelector('.mr-score').value; const name = row.querySelector('.mr-head strong').textContent;
+    if (v === '') { resumeStatus.textContent = `"${name}" 점수를 입력해주세요 (0~${row.dataset.max}점).`; resumeStatus.className = 'status err'; row.querySelector('.mr-score').focus(); return; }
+    scores[row.dataset.key] = v; comments[row.dataset.key] = row.querySelector('.mr-comment').value;
+  }
+  const btn = document.getElementById('manualScoreBtn'); btn.disabled = true; resumeStatus.textContent = ''; resumeStatus.className = 'status'; resumeResult.hidden = true;
+  try {
+    const res = await fetch('/api/screen-resume/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      positionId: evalPositionSelect.value, scores, comments, summary: document.getElementById('manualSummary').value,
+      candidate: { name: document.getElementById('noapiName').value, phone: document.getElementById('noapiPhone').value, education: document.getElementById('noapiEdu').value, career: document.getElementById('noapiCareer').value },
+    }) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok || !data.success) throw new Error(data.error || '계산하지 못했어요.');
+    analyzedPdf = null; notionReviewResult = null;     // 이전 평가의 PDF·노션 결과가 이번 결과에 붙지 않게
+    renderScreening(data.result);
+  } catch (err) { resumeStatus.textContent = err.message || '계산 중 오류가 발생했어요.'; resumeStatus.className = 'status err'; }
+  finally { btn.disabled = false; }
+});
+const pastePromptStatus = document.getElementById('pastePromptStatus');
+const pasteShown = document.getElementById('pasteShown');   // 자동 복사가 막힌 환경에서 요청문을 보여주는 읽기 전용 글칸
+function setPasteStatus(msg, cls) { pastePromptStatus.textContent = msg || ''; pastePromptStatus.className = 'status' + (cls ? ' ' + cls : ''); }
+document.getElementById('pastePromptBtn').addEventListener('click', async () => {
+  if (!evalPositionSelect.value) { setPasteStatus('평가할 공고를 먼저 선택해주세요.', 'err'); return; }
+  if (criteriaHasUnsaved() && !confirm('사명·인재상을 고치는 중이에요.\n저장하지 않은 수정은 요청문에 들어가지 않아요. 저장된 내용으로 만들까요?\n\n[취소]를 누르고 먼저 "저장"하셔도 돼요.')) return;
+  const btn = document.getElementById('pastePromptBtn'); btn.disabled = true; setPasteStatus('');
+  try {
+    const res = await fetch('/api/screen-resume/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionId: evalPositionSelect.value, resumeText: document.getElementById('pasteResumeText').value, usePeers: usePeersEl.checked }) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok || !data.success) throw new Error(data.error || '요청문을 만들지 못했어요.');
+    let copied = false;
+    try { await navigator.clipboard.writeText(data.prompt); copied = true; } catch { /* 복사 권한이 없으면 아래 글칸에 보여줘요 */ }
+    pasteShown.value = data.prompt; pasteShown.hidden = copied;
+    setPasteStatus(copied ? `요청문을 복사했어요 (${data.length.toLocaleString()}자). 이제 Claude 채팅에 붙여넣고 보내세요. ${document.getElementById('pasteResumeText').value.trim() ? '' : '이력서 PDF는 그 채팅에 첨부하세요.'}` : '자동 복사가 막혀 있어요. 아래 글칸의 내용을 전체 선택해서 직접 복사하세요.', 'ok');
+    if (!copied) { pasteShown.focus(); pasteShown.select(); }
+  } catch (err) { setPasteStatus(err.message || '요청문을 만드는 중 오류가 발생했어요.', 'err'); }
+  finally { btn.disabled = false; }
+});
+document.getElementById('pasteImportBtn').addEventListener('click', async () => {
+  if (!evalPositionSelect.value) { resumeStatus.textContent = '평가할 공고를 먼저 선택해주세요.'; resumeStatus.className = 'status err'; return; }
+  const answer = document.getElementById('pasteAnswer').value;
+  if (!answer.trim()) { resumeStatus.textContent = 'Claude의 답변을 먼저 붙여넣어주세요.'; resumeStatus.className = 'status err'; return; }
+  const btn = document.getElementById('pasteImportBtn'); btn.disabled = true; resumeStatus.textContent = ''; resumeStatus.className = 'status'; resumeResult.hidden = true;
+  try {
+    const res = await fetch('/api/screen-resume/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionId: evalPositionSelect.value, answer }) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok || !data.success) throw new Error(data.error || '가져오지 못했어요.');
+    analyzedPdf = null; notionReviewResult = null;
+    renderScreening(data.result);
+  } catch (err) { resumeStatus.textContent = err.message || '가져오는 중 오류가 발생했어요.'; resumeStatus.className = 'status err'; }
+  finally { btn.disabled = false; }
+});
 
 screenResumeBtn.addEventListener('click', async () => {
   const mode = resumeMode();
@@ -2605,9 +2886,13 @@ function optionsHtml(list, blankLabel) {
   const blank = blankLabel ? `<option value="">${escapeHtml(blankLabel)}</option>` : '';
   return blank + list.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
 }
-function jobFromPosition(name) {
+function jobFromPosition(name, brand) {
   const i = name.indexOf(' - ');
-  return i >= 0 ? name.slice(i + 3).trim() : name;
+  const job = i >= 0 ? name.slice(i + 3).trim() : name;
+  // 이름 끝의 " [브랜드]"는 서버가 공고 이름에 붙인 표시라서 노션 지원직무 칸에서는 뗌. 추측하지 않고 "이 공고의 브랜드와 정확히 같을 때만" 떼요.
+  // (옛 공고처럼 포지션 이름 자체에 "[비바라비다]"가 들어 있는 경우는 이름의 일부이니 그대로 둬요)
+  if (brand) { const tail = ` [${brand}]`; if (job.endsWith(tail)) return job.slice(0, -tail.length).trim() || job; }
+  return job;
 }
 
 async function prepareNotionRegister(r) {
@@ -2696,7 +2981,7 @@ async function registerToNotion(force = false) {
         name,
         phone: notionPhoneEl.value.trim(),
         team: notionTeamEl.value,
-        job: jobFromPosition(lastScreening.position.name),
+        job: jobFromPosition(lastScreening.position.name, lastScreening.position.brand),
         channels: [...notionChannelsEl.querySelectorAll('input:checked')].map(i => i.value),
         appliedAt: notionAppliedAtEl.value,
         status: notionStatusSel.value,
@@ -2731,7 +3016,7 @@ async function registerToNotion(force = false) {
     }
     registeredApplicant = {
       id: data.id, name, phone: notionPhoneEl.value.trim(), team: notionTeamEl.value,
-      job: jobFromPosition(lastScreening.position.name), status: notionStatusSel.value,
+      job: jobFromPosition(lastScreening.position.name, lastScreening.position.brand), status: notionStatusSel.value,
       interview1: '', interview2: '', smsStatus: '',
     };
     afterRegister.hidden = false;
@@ -3759,7 +4044,7 @@ async function batchRegister(row, tr, force) {
     const res = await fetch('/api/notion/register-applicant', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name, phone: tr.querySelector('.br-phone').value.trim(), team, job: jobFromPosition(r.position.name),
+        name, phone: tr.querySelector('.br-phone').value.trim(), team, job: jobFromPosition(r.position.name, r.position.brand),
         channels: channel ? [channel] : [], appliedAt: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }),
         status: tr.querySelector('.br-status').value, recommendation: NOTION_REC_MAP[r.recommendation] || '',
         total: r.total, summary: batchSummary(r), education: cand.education || '', career: cand.career || '', force,
@@ -3773,7 +4058,7 @@ async function batchRegister(row, tr, force) {
       msg.textContent = '중복일 수 있어서 등록하지 않았어요.'; msg.className = 'status br-msg'; submit.disabled = false; return;
     }
     if (!res.ok) throw new Error(data.error || '등록 실패');
-    row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone: tr.querySelector('.br-phone').value.trim(), team, job: jobFromPosition(r.position.name), status: tr.querySelector('.br-status').value, interview1: '', interview2: '', smsStatus: '' };
+    row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone: tr.querySelector('.br-phone').value.trim(), team, job: jobFromPosition(r.position.name, r.position.brand), status: tr.querySelector('.br-status').value, interview1: '', interview2: '', smsStatus: '' };
     batchRender();
     // 이력서 PDF도 붙임 (실패해도 카드는 이미 만들어졌으니 안내만)
     try {
