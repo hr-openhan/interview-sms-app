@@ -308,7 +308,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-11';
+const APP_VERSION = '2026.10.21-12';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -384,7 +384,9 @@ const PERMISSION_RULES = [
   R('GET',    /^\/api\/interview\/bank$/,          [['schedule', 'view'], ['resume', 'view']]),
   R('POST',   /^\/api\/interview\/questions$/,     [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/interview\/import$/,        [['schedule', 'edit'], ['resume', 'edit']]),
-  R('POST',   /^\/api\/interview\/save-to-notion$/, [['resume', 'edit']]),
+  R('POST',   /^\/api\/interview\/save-to-notion$/, [['schedule', 'edit'], ['resume', 'edit']]),
+  R('GET',    /^\/api\/interview\/card$/,          [['schedule', 'view'], ['resume', 'view']]),
+  R('POST',   /^\/api\/interview\/save-answers$/,  [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/logout$/,                  'authed'),
   R('GET',    /^\/api\/(storage-check|smsko-check)$/, 'diag'),   // 설정 진단: Google 모드에서는 소유주만
   R('*',      /^\/api\/admin\//,                  'admin'),      // 권한 관리: 소유주만
@@ -3194,6 +3196,137 @@ app.post('/api/interview/questions', requireNotion, ah(async (req, res) => {
     let parsed = null; try { parsed = extractJson(text); } catch { parsed = null; }
     const c = cleanCustomQuestions(parsed && parsed.questions);
     res.json({ ...out, mode, custom: c.questions, dropped: c.dropped });
+  } catch (err) { sendNotionError(res, err); }
+}));
+// ---------- 면접 답변을 노션 "채용 문항" 표에 쓰기 ----------
+// 지원자 카드 안의 인라인 표 "채용 문항"(질문=제목, No·기준·답변=텍스트, 전형·점수 선택=선택)에서 질문 행을 찾아 답변과 점수(⭐)를 써요.
+// 표가 없거나 칸 이름이 다르면 카드 본문에 "면접 답변 기록"으로 대신 기록해요.
+const QDB_TITLE = '채용 문항';
+const QDB_PROPS = { '질문': 'title', 'No': 'rich_text', '기준': 'rich_text', '답변': 'rich_text', '전형': 'select', '점수 선택': 'select' };
+const normNo = v => String(v ?? '').replace(/\\/g, '').replace(/\s+/g, '').trim();
+const normQ = v => String(v ?? '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+const scoreOf = name => { const n = (String(name || '').match(/⭐/g) || []).length; return n >= 1 && n <= 5 ? n : 0; };
+const richChunks = t => { const x = String(t ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, 9500); const out = []; for (let i = 0; i < x.length; i += 1900) out.push({ type: 'text', text: { content: x.slice(i, i + 1900) } }); return out; };
+async function mapLimit(list, limit, fn) {
+  const out = new Array(list.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, async () => { while (next < list.length) { const i = next++; out[i] = await fn(list[i], i); } }));
+  return out;
+}
+// 카드 본문에서 "채용 문항" 인라인 표를 찾아요. 없거나 읽을 수 없으면 null.
+async function findQuestionDb(pageId) {
+  let cursor = ''; 
+  for (let n = 0; n < 3; n++) {
+    const r = await notionRequest('GET', `/v1/blocks/${pageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ''}`);
+    const hit = (r.results || []).find(k => k.type === 'child_database' && String((k.child_database && k.child_database.title) || '').trim().startsWith(QDB_TITLE));
+    if (hit) return hit.id;
+    if (!r.has_more || !r.next_cursor) break; cursor = r.next_cursor;
+  }
+  return null;
+}
+async function readQuestionRows(dbId) {
+  const rows = []; let cursor = '';
+  for (let n = 0; n < 3; n++) {
+    const r = await notionRequest('POST', `/v1/databases/${dbId}/query`, { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) });
+    for (const pg of (r.results || [])) {
+      const P = pg.properties || {};
+      rows.push({ id: pg.id, no: normNo(readRich(P['No'])), type: (P['전형'] && P['전형'].select && P['전형'].select.name) || '', question: normQ(readRich(P['질문'])), answer: readRich(P['답변']).trim(), score: scoreOf(P['점수 선택'] && P['점수 선택'].select && P['점수 선택'].select.name) });
+    }
+    if (!r.has_more || !r.next_cursor) break; cursor = r.next_cursor;
+  }
+  return rows;
+}
+async function questionDbProblems(dbId) {
+  const db = await notionRequest('GET', `/v1/databases/${dbId}`); const props = db.properties || {}; const problems = [];
+  for (const [name, type] of Object.entries(QDB_PROPS)) { if (!props[name]) problems.push(`'${name}' 칸이 없어요`); else if (props[name].type !== type) problems.push(`'${name}' 칸의 종류가 달라요`); }
+  return problems;
+}
+const NOTION_ID_RE = /^[0-9a-f-]{32,40}$/i;
+app.get('/api/interview/card', requireNotion, ah(async (req, res) => {
+  try {
+    const id = String(req.query.applicantId || '').trim();
+    if (!NOTION_ID_RE.test(id)) return res.status(400).json({ error: '노션 지원자를 선택해주세요.' });
+    const page = await notionRequest('GET', `/v1/pages/${id}`);
+    const basis = cardToResumeBasis(page);
+    const out = { success: true, applicant: { id: basis.id, name: basis.name, team: basis.team, job: basis.job, url: basis.url, summary: basis.summary.slice(0, 1900), education: basis.education, career: basis.career }, table: { found: false, rows: [], note: '' } };
+    let dbId = null;
+    try { dbId = await findQuestionDb(id); } catch { out.table.note = '카드 본문을 읽지 못해 채용 문항 표를 찾지 못했어요.'; }
+    if (dbId) {
+      try {
+        const problems = await questionDbProblems(dbId);
+        if (problems.length) out.table.note = '채용 문항 표는 있지만 칸이 달라요: ' + problems.join(' / ');
+        else { out.table.found = true; out.table.rows = (await readQuestionRows(dbId)).map(r => ({ no: r.no, type: r.type, question: r.question, answer: r.answer, score: r.score })); }
+      } catch { out.table.note = '채용 문항 표를 읽지 못했어요.'; }
+    } else if (!out.table.note) out.table.note = '이 카드에는 "채용 문항" 표가 없어요. 답변은 카드 본문에 "면접 답변 기록"으로 남겨요.';
+    res.json(out);
+  } catch (err) { sendNotionError(res, err); }
+}));
+app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
+  try {
+    const b = req.body || {};
+    const id = String(b.applicantId || '').trim();
+    if (!NOTION_ID_RE.test(id)) return res.status(400).json({ error: '노션 지원자를 선택해주세요.' });
+    if (!Array.isArray(b.items) || b.items.length > 60) return res.status(400).json({ error: '보낼 답변 목록이 올바르지 않아요(60개 이내).' });
+    const items = b.items.map(x => {
+      const sc = Number(x && x.score);
+      return {
+        no: /^[A-Z]_\d{2}(?:_\d)?$/.test(String((x && x.no) ?? '')) ? String(x.no) : '',
+        type: ['필수', '선택', '맞춤'].includes(String((x && x.type) ?? '')) ? String(x.type) : '맞춤',
+        question: normQ(x && x.question).slice(0, 300),
+        criteria: String((x && x.criteria) ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
+        answer: String((x && x.answer) ?? '').replace(/\r\n/g, '\n').trim().slice(0, 6000),
+        base: x && x.base !== undefined && x.base !== null ? String(x.base).trim() : null,
+        score: Number.isInteger(sc) && sc >= 1 && sc <= 5 ? sc : 0,
+      };
+    }).filter(x => x.question.length >= 4 && (x.answer || x.score));
+    if (!items.length) return res.status(400).json({ error: '보낼 답변이나 점수를 하나 이상 적어주세요.' });
+    let dbId = null; try { dbId = await findQuestionDb(id); } catch { dbId = null; }
+    let problems = []; if (dbId) { try { problems = await questionDbProblems(dbId); } catch { problems = ['표 구조를 읽지 못했어요']; } }
+    // ---- 채용 문항 표에 쓰기
+    if (dbId && !problems.length) {
+      const rows = await readQuestionRows(dbId);
+      const byNo = new Map(rows.filter(r => r.no).map(r => [r.no, r])); const byQ = new Map(rows.filter(r => r.question).map(r => [r.question, r]));
+      const plan = items.map(it => ({ it, row: (it.no && byNo.get(normNo(it.no))) || byQ.get(normQ(it.question)) || null }));
+      // 이 화면이 불러온 답변(base)과 노션의 현재 답변이 다르면(누가 먼저 고쳤으면) 덮어쓰기 전에 확인해요
+      const conflicts = plan.filter(({ it, row }) => row && it.answer && row.answer && row.answer !== it.answer && row.answer !== (it.base ?? '')).map(({ it, row }) => ({ no: row.no || it.no, question: it.question }));
+      if (conflicts.length && !b.force) return res.status(409).json({ conflict: true, conflicts, error: '노션에 이미 다른 답변이 적혀 있는 질문이 있어요.' });
+      let created = 0, updated = 0, skipped = 0; const failed = [];
+      const maxC = Math.max(0, ...rows.map(r => /^C_(\d+)$/.test(r.no) ? Number(RegExp.$1) : 0)); let seq = maxC;
+      const jobs = plan.map(({ it, row }) => (row ? { kind: 'update', it, row } : { kind: 'create', it, code: it.no || `C_${String(++seq).padStart(2, '0')}` }));
+      await mapLimit(jobs, 3, async job => {
+        const { it } = job;
+        try {
+          if (job.kind === 'update') {
+            const props = {};
+            if (it.answer && it.answer !== job.row.answer) props['답변'] = { rich_text: richChunks(it.answer) };
+            if (it.score && it.score !== job.row.score) props['점수 선택'] = { select: { name: '⭐'.repeat(it.score) } };
+            if (!Object.keys(props).length) { skipped++; return; }
+            await notionRequest('PATCH', `/v1/pages/${job.row.id}`, { properties: props }); updated++;
+          } else {
+            const props = { '질문': { title: [{ type: 'text', text: { content: it.question } }] }, 'No': { rich_text: richChunks(job.code) }, '전형': { select: { name: it.type === '필수' ? '필수질문' : '선택질문' } } };
+            if (it.criteria) props['기준'] = { rich_text: richChunks(it.criteria) };
+            if (it.answer) props['답변'] = { rich_text: richChunks(it.answer) };
+            if (it.score) props['점수 선택'] = { select: { name: '⭐'.repeat(it.score) } };
+            await notionRequest('POST', '/v1/pages', { parent: { database_id: dbId }, properties: props }); created++;
+          }
+        } catch (e) { failed.push({ no: it.no, question: it.question, error: String(e.message || '실패').slice(0, 120) }); }
+      });
+      if (failed.length && !updated && !created) return res.status(502).json({ error: '노션에 답변을 쓰지 못했어요. 노션 연결(통합)에 이 카드의 편집 권한이 있는지 확인해주세요.', failed });
+      return res.json({ success: true, target: 'table', updated, created, skipped, failed });
+    }
+    // ---- 표가 없거나 칸이 달라서 카드 본문에 기록
+    const title = '면접 답변 기록 (앱)';
+    if (!b.force) {
+      const kids = await notionRequest('GET', `/v1/blocks/${id}/children?page_size=100`);
+      const dup = (kids.results || []).some(k => k.type === 'heading_3' && ((k.heading_3 && k.heading_3.rich_text) || []).map(t => (t.plain_text || (t.text && t.text.content) || '')).join('').startsWith(title));
+      if (dup) return res.status(409).json({ duplicate: true, error: '이 카드 본문에는 이미 면접 답변 기록이 있어요. 다시 기록하면 한 번 더 들어가요.' });
+    }
+    const blocks = [nHeading(`${title} · ${new Date().toISOString().slice(0, 10)}`), nNote('앱에서 면접 중에 적은 답변과 점수예요. 최종 평가는 사람이 해요.')];
+    for (const it of items) {
+      blocks.push(nBullet(`${it.no ? `[${it.no}] ` : ''}${it.question}${it.score ? `  ${'⭐'.repeat(it.score)}` : ''}`));
+      if (it.answer) blocks.push(nNote(`답변: ${it.answer}`));
+    }
+    await appendBlocks(id, blocks.slice(0, 100));
+    res.json({ success: true, target: 'body', updated: 0, created: 0, skipped: 0, failed: [], count: items.length, note: dbId ? '채용 문항 표의 칸이 달라서 카드 본문에 기록했어요: ' + problems.join(' / ') : '이 카드에는 채용 문항 표가 없어서 카드 본문에 기록했어요.' });
   } catch (err) { sendNotionError(res, err); }
 }));
 const IQ_SAVE_TITLE = '추천 면접 질문 (앱)';
