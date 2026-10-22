@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-11">
+<html lang="ko" data-app-version="2026.10.21-12">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,6 +15,7 @@
       </div>
       <nav class="tabs">
         <button class="tab-btn active" data-tab="resume" data-menus="resume">이력서 검토</button>
+        <button class="tab-btn" data-tab="interview" data-menus="schedule resume">면접 관리</button>
         <button class="tab-btn" data-tab="applicants" data-menus="resume">지원자 관리</button>
         <button class="tab-btn" data-tab="posting" data-menus="resume">공고 만들기</button>
         <button class="tab-btn" data-tab="send" data-menus="send history schedule">문자 보내기</button>
@@ -781,6 +782,41 @@
       </section>
     </div>
 
+    <div id="interviewView" class="resume-view" hidden>
+      <section class="panel">
+        <h2>면접 관리</h2>
+        <p class="manage-hint">노션 「진행중 채용」의 지원자를 골라 <strong>노션 문항(채용 문항 표)과 이력서 평가 요약을 바탕으로 맞춤 면접 질문</strong>을 만들고, 면접 중에 <strong>답변과 점수(⭐)를 여기에 적어 노션에 전송</strong>해요. 질문과 점수는 참고이고 합격·불합격은 사람이 정해요. 나이·결혼·가족·종교·외모 같은 질문은 만들지 않아요.</p>
+        <div class="iv-filters">
+          <select id="ivTeam" aria-label="팀 필터"><option value="">전체 팀</option></select>
+          <select id="ivStatus" aria-label="면접상태 필터">
+            <option value="active">진행 중 (서류합격·면접 예정·과제)</option>
+            <option value="1차 면접 예정자">1차 면접 예정자</option>
+            <option value="2차 면접 예정">2차 면접 예정</option>
+            <option value="서류합격">서류합격</option>
+            <option value="채용 과제">채용 과제</option>
+            <option value="all">전체</option>
+          </select>
+          <input id="ivSearch" type="text" placeholder="이름으로 검색" autocomplete="off" />
+          <button id="ivRefreshBtn" class="add-btn" type="button">새로고침</button>
+        </div>
+        <p id="ivStatusMsg" class="status"></p>
+        <table class="history-table stack-table iv-table">
+          <thead><tr><th>이름</th><th>팀</th><th>지원직무</th><th>면접상태</th><th>면접일</th><th></th></tr></thead>
+          <tbody id="ivBody"><tr><td colspan="6" class="empty-row">불러오는 중...</td></tr></tbody>
+        </table>
+        <button id="ivMoreBtn" class="link-btn" type="button" hidden>더 보기</button>
+      </section>
+      <section class="panel" id="ivDetail" hidden>
+        <div class="iv-detail-head">
+          <h2 id="ivDetailTitle">면접 질문</h2>
+          <button id="ivDetailClose" class="link-btn" type="button">닫기</button>
+        </div>
+        <details id="ivSummaryBox" class="help" hidden><summary>이력서 평가 요약 보기 (노션 카드의 기록)</summary><pre id="ivSummary" class="iv-summary"></pre></details>
+        <p id="ivTableNote" class="manage-hint"></p>
+        <div id="ivPanelHost"></div>
+      </section>
+    </div>
+
     <div id="applicantsView" class="resume-view" hidden>
       <section class="panel" data-menu="resume">
         <h2>지원자 관리</h2>
@@ -896,21 +932,9 @@
     </div>
   </template>
 
-  <template id="scheduleCardTpl">
-    <div class="tpl-card">
-      <div class="tpl-card-head">
-        <h3 class="sch-name-view"></h3>
-        <div class="tpl-card-actions">
-          <button class="sch-calendar-btn">구글캘린더에 추가</button>
-          <button class="sch-iq-btn" type="button" title="노션 문항 은행과 이력서를 바탕으로 면접 질문을 추천해요">면접 질문 추천</button>
-          <button class="sch-edit-btn" data-edit="schedule">수정</button>
-          <button class="sch-save-btn" hidden>저장</button>
-          <button class="sch-cancel-btn" hidden>취소</button>
-          <button class="sch-delete-btn" data-edit="schedule">삭제</button>
-        </div>
-      </div>
 
-      <div class="sch-iq-panel" hidden>
+  <template id="iqPanelTpl">
+      <div class="sch-iq-panel iq-panel" hidden>
         <div class="iq-head"><strong>면접 질문 추천</strong><button class="sch-iq-close link-btn" type="button">닫기</button></div>
         <p class="manage-hint iq-intro">노션 문항 은행(필수 15·선택 13)과 노션 지원자 카드의 이력서 평가 요약을 바탕으로 질문을 골라요. 질문은 <strong>참고</strong>예요. 나이·결혼·가족·종교·외모 같은 질문은 만들지 않고, 최종 질문은 면접관이 정해요.</p>
         <div class="iq-pick"></div>
@@ -929,6 +953,22 @@
         </div>
         <div class="iq-result" hidden></div>
       </div>
+  </template>
+  <template id="scheduleCardTpl">
+    <div class="tpl-card">
+      <div class="tpl-card-head">
+        <h3 class="sch-name-view"></h3>
+        <div class="tpl-card-actions">
+          <button class="sch-calendar-btn">구글캘린더에 추가</button>
+          <button class="sch-iq-btn" type="button" title="노션 문항 은행과 이력서를 바탕으로 면접 질문을 추천해요">면접 질문 추천</button>
+          <button class="sch-edit-btn" data-edit="schedule">수정</button>
+          <button class="sch-save-btn" hidden>저장</button>
+          <button class="sch-cancel-btn" hidden>취소</button>
+          <button class="sch-delete-btn" data-edit="schedule">삭제</button>
+        </div>
+      </div>
+
+      <div class="sch-iq-slot"></div>
 
       <div class="sch-detail-view">
         <div class="sch-detail-row"><span class="sch-detail-label">연락처</span><span class="sch-phone-view"></span></div>
