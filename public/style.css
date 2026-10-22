@@ -1874,3 +1874,24 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .brand-quick-add .add-btn { padding: 8px 14px; font-size: 13.5px; }
 .brand-quick .status { flex: 1 1 100%; margin: 0; }
 .brand-quick .status:empty { display: none; }
+
+/* 면접 질문 추천 패널 (면접 일정 카드) */
+.sch-iq-panel { margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.sch-iq-panel .iq-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sch-iq-panel .iq-intro { margin: 4px 0 8px; }
+.sch-iq-panel .iq-mode { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.sch-iq-panel .iq-pick { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sch-iq-panel .iq-pick select { max-width: 100%; }
+.sch-iq-panel textarea { width: 100%; box-sizing: border-box; max-width: 100%; margin-top: 6px; }
+.sch-iq-panel .iq-group { margin-top: 12px; }
+.sch-iq-panel .iq-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.sch-iq-panel .iq-list li { padding: 6px 8px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+.sch-iq-panel .iq-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.sch-iq-panel .iq-q { word-break: break-word; }
+.sch-iq-panel .iq-no { display: inline-block; margin-right: 6px; padding: 0 6px; font-size: 12px; border-radius: 8px; background: #eee7d6; color: #6b5a2e; }
+.sch-iq-panel .iq-sub { margin: 2px 0 0 26px; font-size: 12.5px; color: var(--muted, #6b6558); word-break: break-word; }
+.sch-iq-panel .iq-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* 카드 머리의 버튼 줄: 좁은 화면에서는 줄바꿈 (면접 질문 추천 버튼이 늘어 375px에서 넘치던 문제) */
+.tpl-card-head { flex-wrap: wrap; }
+.tpl-card-actions { flex-wrap: wrap; flex-shrink: 1; }

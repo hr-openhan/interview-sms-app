@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-9';
+const APP_VERSION = '2026.10.21-11';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -935,6 +935,8 @@ function renderScheduleCard(s, container) {
   const deleteBtn = node.querySelector('.sch-delete-btn');
   const calendarBtn = node.querySelector('.sch-calendar-btn');
   const statusMsg = node.querySelector('.sch-status-msg');
+
+  setupInterviewPanel(card, s);   // 면접 질문 추천(노션 문항 은행 + 이력서 맞춤)
 
   calendarBtn.addEventListener('click', () => {
     try {
@@ -2217,21 +2219,40 @@ async function loadJdTemplates() {
 // 팀·포지션을 바꾸고 잠깐 멈추면 어울리는 템플릿을 추천 (포지션 이름에 맞는 단어가 있을 때만)
 async function refreshJdRecommend() {
   const seq = ++jdRecSeq; const team = currentTeam(); const position = postPosition.value.trim();
-  if (!team || !position) { jdTplRec.hidden = true; jdTplRec.innerHTML = ''; return; }
+  if (!team) { jdTplRec.hidden = true; jdTplRec.innerHTML = ''; return; }   // 팀만 골라도 그 팀의 템플릿을 보여줘요(포지션은 비어 있어도 돼요)
   try {
     const res = await fetch(`/api/jd-templates/recommend?team=${encodeURIComponent(team)}&position=${encodeURIComponent(position)}`); const data = await res.json();
     if (seq !== jdRecSeq || !res.ok) return;
     const list = data.recommended || [];
     if (!list.length) { jdTplRec.hidden = true; jdTplRec.innerHTML = ''; return; }
     jdTplRec.hidden = false;
-    jdTplRec.innerHTML = '<span class="rec-label">추천:</span>' + list.map((r, i) => `<button type="button" class="${i === 0 ? 'add-btn' : 'link-btn'} rec-btn" data-id="${escapeHtml(r.id)}">${escapeHtml(r.title)} 로 채우기</button>`).join('');
+    // 포지션 단어가 맞은 템플릿이 있으면 "추천"(맞은 것 중 첫 번째만 강조), 없으면 "이 팀의 템플릿"으로만 보여주고 어느 것도 강조하지 않아요
+    const matched = list.some(r => r.hit && r.hit.length);
+    jdTplRec.innerHTML = `<span class="rec-label">${matched ? '추천:' : `${escapeHtml(team)} 템플릿:`}</span>` + list.map((r, i) => `<button type="button" class="${matched && i === 0 ? 'add-btn' : 'link-btn'} rec-btn" data-id="${escapeHtml(r.id)}">${escapeHtml(r.title)}${euro(r.title)} 채우기</button>`).join('');
   } catch { /* 추천을 못 받아도 아래에서 직접 고를 수 있어요 */ }
 }
 function scheduleJdRecommend() { clearTimeout(jdRecTimer); jdRecTimer = setTimeout(refreshJdRecommend, 400); }
+// 받침 유무에 맞는 "으로/로"(ㄹ 받침은 "로"): "재무/회계" + 로, "총무" + 로, "인사팀장" + 으로 ... 한글이 아니면 "(으)로"
+function euro(word) {
+  const ch = String(word || '').trim().slice(-1); const c = ch.charCodeAt(0);
+  if (!(c >= 0xAC00 && c <= 0xD7A3)) return '(으)로';
+  const jong = (c - 0xAC00) % 28; return jong === 0 || jong === 8 ? '로' : '으로';
+}
 async function fillFromTemplate(id) {
-  if (!requireTeamAndPosition()) return;
+  if (!currentTeam()) { requireTeamAndPosition(); return; }
   if (!id) { setJdTplStatus('채울 템플릿을 먼저 골라주세요.', 'err'); return; }
+  // 팀만 고르고 포지션을 안 썼으면(팀의 템플릿을 바로 누른 경우) 템플릿 이름으로 포지션을 채워요. 사람이 쓴 포지션은 바꾸지 않아요.
+  // 덮어쓰기 확인에서 취소하면 아무것도 바뀌지 않아야 해서, 포지션 칸은 확인을 통과한 뒤에 채워요.
+  let filledPosition = '';
+  let nameForEmpty = '';
+  if (!postPosition.value.trim()) {
+    const t = jdTemplates.find(x => x.id === id);
+    nameForEmpty = t ? String(t.title).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) : '';   // "마케팅 (브랜드 / 퍼포먼스)" → "마케팅"
+  }
   if (postJd.value.trim() && !confirm('지금 써 둔 공고문이 있어요.\n템플릿 내용으로 바꿀까요? 쓰던 내용은 사라져요.\n\n[취소]를 누르면 아무것도 바뀌지 않아요.')) return;
+  if (nameForEmpty && !postPosition.value.trim()) { postPosition.value = nameForEmpty; filledPosition = nameForEmpty; postDirty = true; postPosition.dispatchEvent(new Event('input')); }
+  if (!requireTeamAndPosition()) return;
+
   const c = collectPosting();
   try {
     const res = await fetch('/api/postings/from-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId: id, team: c.team, brand: c.brand, position: c.position, workplace: c.workplace, employmentType: c.employmentType, months: c.months, applyStart: c.applyStart, applyEnd: c.applyEnd, portfolio: postPortfolio.checked, aiFocus: aiFocusEl.checked }) });
@@ -2241,7 +2262,7 @@ async function fillFromTemplate(id) {
     postJd.value = data.jd; postDirty = true; variantEdited = false; variantBox.hidden = true; variantsState = [];
     applyCareerSuggestion(data.careerSuggestion);
     updatePostTodo(); runPostCheck();
-    setJdTplStatus(`"${data.title}" 템플릿으로 채웠어요. ${careerState === 'suggested' ? `경력은 템플릿의 추천값(${postCareer.value})이에요 — 위 "경력" 칸에서 확인하고 고쳐주세요. ` : ''}${data.aiFocusApplied ? 'AI 활용 항목을 요건·우대에 넣고 지원 방법에 AI 작업 사례 줄을 붙였어요. ' : ''}${data.placeholders ? `[입력] ${data.placeholders}곳은 직접 채워주세요.` : ''}`, 'ok');
+    setJdTplStatus(`"${data.title}" 템플릿으로 채웠어요. ${filledPosition ? `포지션 칸이 비어 있어서 "${filledPosition}"${euro(filledPosition)} 채웠어요 — 필요하면 고쳐주세요. ` : ''}${careerState === 'suggested' ? `경력은 템플릿의 추천값(${postCareer.value})이에요 — 위 "경력" 칸에서 확인하고 고쳐주세요. ` : ''}${data.aiFocusApplied ? 'AI 활용 항목을 요건·우대에 넣고 지원 방법에 AI 작업 사례 줄을 붙였어요. ' : ''}${data.placeholders ? `[입력] ${data.placeholders}곳은 직접 채워주세요.` : ''}`, 'ok');
   } catch (err) { setJdTplStatus(err.message || '채우는 중 오류가 발생했어요.', 'err'); }
 }
 document.getElementById('jdTplFillBtn').addEventListener('click', () => fillFromTemplate(jdTplSelect.value));
@@ -2405,6 +2426,133 @@ saraminList.addEventListener('click', async e => {
   saraminStatus.className = 'status ok';
 });
 document.getElementById('saraminBox').addEventListener('toggle', e => { if (e.target.open) refreshSaramin(); });
+
+// ---------- 면접 질문 추천 (면접 일정 카드) ----------
+// 일정의 이름·연락처로 노션 지원자를 찾고, 문항 은행(필수·오프닝·추천 선택)과 이력서 맞춤 질문을 체크박스로 보여줘요.
+// 맞춤 질문은 버튼을 눌렀을 때만 AI를 불러요(자동으로 비용이 들지 않게). API 없이 쓰려면 요청문을 복사해 Claude 채팅에 붙여넣어요.
+function setupInterviewPanel(card, s) {
+  const btn = card.querySelector('.sch-iq-btn'); const panel = card.querySelector('.sch-iq-panel');
+  if (!btn || !panel) return;
+  const $ = sel => panel.querySelector(sel);
+  const statusEl = $('.iq-status'), pickEl = $('.iq-pick'), modeEl = $('.iq-mode'), resultEl = $('.iq-result'), promptBox = $('.iq-prompt');
+  let applicant = null, data = null, custom = [];
+  const setStatus = (m, c) => { statusEl.textContent = m || ''; statusEl.className = 'status iq-status' + (c ? ' ' + c : ''); };
+  const digits = v => String(v || '').replace(/\D/g, '');
+  btn.addEventListener('click', async () => {
+    panel.hidden = !panel.hidden;
+    if (panel.hidden || applicant) return;
+    setStatus('노션에서 지원자를 찾는 중...');
+    try {
+      const st = await ensureNotionStatus();
+      if (!st || !st.configured) { setStatus('노션이 연결돼 있지 않아서 질문을 추천할 수 없어요. (노션 연결은 설정에서 확인하세요)', 'err'); return; }
+      const res = await fetch('/api/notion/applicants?status=all&q=' + encodeURIComponent(s.name || ''));
+      const j = await readJsonOrNull(res);
+      if (!j || !res.ok) throw new Error((j && j.error) || '노션에서 지원자를 불러오지 못했어요.');
+      const list = (j.applicants || []).filter(x => x.name === s.name);
+      if (!list.length) { setStatus(`노션에서 "${s.name}" 지원자를 찾지 못했어요. 노션 지원자 DB에 같은 이름으로 등록돼 있는지 확인해주세요.`, 'err'); return; }
+      const exact = list.filter(x => digits(x.phone) && digits(x.phone) === digits(s.phone));
+      const cands = exact.length ? exact : list;
+      if (cands.length === 1) { applicant = cands[0]; showMode(); return; }
+      setStatus('이름이 같은 지원자가 여러 명이에요. 누구인지 골라주세요.');
+      pickEl.innerHTML = '<select class="iq-pick-sel" aria-label="노션 지원자 선택">' + cands.map((x, i) => `<option value="${i}">${escapeHtml(x.name)} · ${escapeHtml(x.team || '팀 없음')} · ${escapeHtml(x.job || '직무 없음')} · ${escapeHtml(x.phone || '연락처 없음')}</option>`).join('') + '</select> <button type="button" class="iq-pick-ok add-btn">이 지원자로 진행</button>';
+      pickEl.querySelector('.iq-pick-ok').addEventListener('click', () => { applicant = cands[Number(pickEl.querySelector('.iq-pick-sel').value)]; pickEl.innerHTML = ''; showMode(); });
+    } catch (err) { setStatus(err.message || '지원자를 찾는 중 오류가 발생했어요.', 'err'); }
+  });
+  $('.sch-iq-close').addEventListener('click', () => { panel.hidden = true; });
+  function showMode() {
+    setStatus(`노션 지원자: ${applicant.name}${applicant.team ? ' · ' + applicant.team : ''}${applicant.job ? ' · ' + applicant.job : ''}. 방식을 고르고 "질문 추천받기"를 누르세요.`, 'ok');
+    modeEl.hidden = false;
+  }
+  $('.iq-run').addEventListener('click', async () => {
+    if (!applicant) return;
+    const mode = $('.iq-mode-prompt').checked ? 'prompt' : 'ai';
+    const run = $('.iq-run'); run.disabled = true; setStatus(mode === 'ai' ? 'AI가 맞춤 질문을 만드는 중... (노션 문항은 바로 보여드려요)' : '요청문을 만드는 중...'); resultEl.hidden = true; promptBox.hidden = true; custom = [];
+    try {
+      const res = await fetch('/api/interview/questions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, mode }) });
+      const j = await readJsonOrNull(res);
+      if (!j) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+      if (!res.ok || !j.success) throw new Error(j.error || '질문을 만들지 못했어요.');
+      data = j; custom = j.custom || [];
+      if (mode === 'prompt') { promptBox.hidden = false; promptBox.dataset.prompt = j.prompt; }
+      renderResult();
+      const notes = [];
+      if (!j.applicant.hasSummary) notes.push('이 지원자는 앱에서 남긴 이력서 평가 요약이 없어서 직무 기준으로만 맞춤 질문을 만들어요');
+      if (j.matchedPosition) notes.push(`확정 공고("${j.matchedPosition}")의 요건을 참고했어요`);
+      if (j.dropped) notes.push(`나이·가족 같은 주제의 질문 ${j.dropped}개는 뺐어요`);
+      setStatus(mode === 'ai' ? (custom.length ? `맞춤 질문 ${custom.length}개를 만들었어요.` : '맞춤 질문을 만들지 못했어요. 문항 은행 질문은 그대로 쓸 수 있어요.') + (notes.length ? ' ' + notes.join(' · ') + '.' : '') : '요청문을 만들었어요. 아래 ①②를 진행하세요.' + (notes.length ? ' ' + notes.join(' · ') + '.' : ''), 'ok');
+    } catch (err) { setStatus(err.message || '질문을 만드는 중 오류가 발생했어요.', 'err'); }
+    finally { run.disabled = false; }
+  });
+  async function copyOut(text, shown) { try { await navigator.clipboard.writeText(text); return true; } catch { shown.hidden = false; shown.value = text; shown.focus(); shown.select(); return false; } }
+  $('.iq-copy-prompt').addEventListener('click', async () => {
+    const ok = await copyOut(promptBox.dataset.prompt || '', $('.iq-prompt-shown'));
+    setStatus(ok ? '요청문을 복사했어요. Claude 채팅에 붙여넣고 보내세요.' : '자동 복사가 막혀 있어요. 아래 글칸의 내용을 직접 복사하세요.', ok ? 'ok' : 'err');
+  });
+  $('.iq-import').addEventListener('click', async () => {
+    const answer = $('.iq-answer').value;
+    if (!answer.trim()) { setStatus('Claude의 답변을 먼저 붙여넣어주세요.', 'err'); return; }
+    try {
+      const res = await fetch('/api/interview/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      const j = await readJsonOrNull(res);
+      if (!j) throw new Error('서버가 응답하지 못했어요.');
+      if (!res.ok || !j.success) throw new Error(j.error || '가져오지 못했어요.');
+      custom = j.custom; renderResult(); setStatus(`맞춤 질문 ${custom.length}개를 가져왔어요.${j.dropped ? ` (나이·가족 같은 주제 ${j.dropped}개는 뺐어요)` : ''}`, 'ok');
+    } catch (err) { setStatus(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
+  });
+  function group(title, hint, items, checked, kind) {
+    if (!items.length) return '';
+    return `<div class="iq-group"><strong>${escapeHtml(title)}</strong>${hint ? `<span class="manage-hint" style="margin:0 0 0 6px">${escapeHtml(hint)}</span>` : ''}<ul class="iq-list">` + items.map((q, i) => `
+      <li><label><input type="checkbox" class="iq-chk" data-kind="${kind}" data-i="${i}"${checked ? ' checked' : ''} />
+        <span class="iq-q">${q.no ? `<span class="iq-no">${escapeHtml(q.no)}</span>` : ''}${escapeHtml(q.question)}</span></label>
+        ${q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : ''}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : ''}</li>`).join('') + '</ul></div>';
+  }
+  function renderResult() {
+    if (!data) return;
+    resultEl.hidden = false;
+    const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
+    resultEl.innerHTML =
+      group('이력서 맞춤 질문', 'AI가 지원자의 이력서 평가 요약을 근거로 만든 질문', custom, true, 'custom') +
+      group('필수 질문', `노션 문항 ${data.required.length}개`, data.required, true, 'required') +
+      group('추천 선택 질문', '직무에 어울리는 노션 선택 문항', data.suggested || [], true, 'suggested') +
+      group('오프닝(인사)', '면접 시작 때', data.opening || [], false, 'opening') +
+      group('그 밖의 선택 질문', '필요하면 체크하세요', more, false, 'more') +
+      `<div class="posting-actions iq-actions"><button type="button" class="iq-copy-sel add-btn">선택한 질문 복사</button><button type="button" class="iq-save add-btn" data-edit="resume">노션 카드에 기록</button><span class="manage-hint iq-count"></span></div>`;
+    resultEl.querySelectorAll('.iq-chk').forEach(c => c.addEventListener('change', updateCount)); updateCount();
+    resultEl.querySelector('.iq-copy-sel').addEventListener('click', copySelected);
+    resultEl.querySelector('.iq-save').addEventListener('click', () => saveSelected(false));
+  }
+  function selected() {
+    const pick = kind => [...resultEl.querySelectorAll(`.iq-chk[data-kind="${kind}"]:checked`)].map(c => Number(c.dataset.i));
+    const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
+    return {
+      custom: pick('custom').map(i => custom[i]).filter(Boolean), required: pick('required').map(i => data.required[i]).filter(Boolean),
+      suggested: [...pick('suggested').map(i => (data.suggested || [])[i]), ...pick('more').map(i => more[i])].filter(Boolean), opening: pick('opening').map(i => (data.opening || [])[i]).filter(Boolean),
+    };
+  }
+  function updateCount() { const q = selected(); const n = q.custom.length + q.required.length + q.suggested.length + q.opening.length; resultEl.querySelector('.iq-count').textContent = `${n}개 선택`; }
+  async function copySelected() {
+    const q = selected(); const lines = [];
+    const add = (t, list) => { if (list.length) { lines.push(`[${t}]`); list.forEach((x, i) => lines.push(`${i + 1}. ${x.question}${x.criteria ? ` (확인: ${x.criteria})` : ''}`)); lines.push(''); } };
+    add('오프닝', q.opening); add('이력서 맞춤 질문', q.custom); add('필수 질문', q.required); add('선택 질문', q.suggested);
+    if (!lines.length) { setStatus('복사할 질문을 하나 이상 골라주세요.', 'err'); return; }
+    let ok = false; try { await navigator.clipboard.writeText(lines.join('\n').trim()); ok = true; } catch { /* 권한이 없으면 안내만 */ }
+    setStatus(ok ? '선택한 질문을 복사했어요.' : '자동 복사가 막혀 있어요. 브라우저 설정에서 복사를 허용하거나 "노션 카드에 기록"을 쓰세요.', ok ? 'ok' : 'err');
+  }
+  async function saveSelected(force) {
+    const q = selected();
+    if (!(q.custom.length + q.required.length + q.suggested.length + q.opening.length)) { setStatus('기록할 질문을 하나 이상 골라주세요.', 'err'); return; }
+    const btn2 = resultEl.querySelector('.iq-save'); btn2.disabled = true; setStatus('노션 카드에 기록하는 중...');
+    try {
+      const res = await fetch('/api/interview/save-to-notion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, ...q, force }) });
+      const j = await readJsonOrNull(res);
+      if (!j) throw new Error('서버가 응답하지 못했어요.');
+      if (res.status === 409 && j.duplicate) { btn2.disabled = false; if (confirm(`${j.error}\n\n그래도 다시 기록할까요?`)) return saveSelected(true); setStatus('기록하지 않았어요.', 'err'); return; }
+      if (!res.ok || !j.success) throw new Error(j.error || '기록하지 못했어요.');
+      setStatus(`노션 카드 본문에 질문 ${j.count}개를 기록했어요.`, 'ok');
+    } catch (err) { setStatus(err.message || '기록하는 중 오류가 발생했어요.', 'err'); }
+    finally { btn2.disabled = false; }
+  }
+}
 
 // ---------- 공고 점검 (서버의 규칙 기반 점검 결과를 보여줌 / AI를 쓰지 않아 비용이 들지 않아요) ----------
 const postCheckList = document.getElementById('postCheckList');
@@ -2612,6 +2760,7 @@ function peerLinesHtml(r) {
   }
   return out.join('');
 }
+const CHECK_CLASS = { '확인됨': 'req-ok', '확인 필요': 'req-part', '확인 불가': 'req-unk' };   // 서류 체크리스트 상태 색(필수 요건 체크와 같은 색)
 const REQ_CLASS = { '충족': 'req-ok', '부분 충족': 'req-part', '미충족': 'req-no', '확인불가': 'req-unk' };
 function renderScreening(r) {
   lastScreening = r;
@@ -2644,6 +2793,9 @@ function renderScreening(r) {
   const reqs = r.requirements || [];
   document.getElementById('requirementsBox').hidden = !reqs.length;
   document.getElementById('resumeRequirements').innerHTML = reqs.map(q => `<li><span class="req-tag ${REQ_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.evidence ? ' — ' + escapeHtml(q.evidence) : ''}</li>`).join('');
+  const ck = r.checklist || [];
+  document.getElementById('checklistBox').hidden = !ck.length;
+  document.getElementById('resumeChecklist').innerHTML = ck.map(q => `<li><span class="req-tag ${CHECK_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.note ? ' — ' + escapeHtml(q.note) : ''}</li>`).join('');
   resumeStrengths.innerHTML = listHtml(r.strengths);
   resumeConcerns.innerHTML = listHtml(r.concerns);
   missingDocsBox.hidden = !(r.missingDocs && r.missingDocs.length);
@@ -3069,6 +3221,7 @@ async function registerToNotion(force = false) {
         summary: buildNotionSummary(lastScreening, total),
         education: (lastScreening.candidate || {}).education || '',
         career: (lastScreening.candidate || {}).career || '',
+        checklist: (lastScreening.checklist || []).map(x => ({ code: x.code, status: x.status, note: x.note })),   // 카드 본문에 서류 체크리스트를 기록해요
         force,
       }),
     });
@@ -4127,6 +4280,7 @@ async function batchRegister(row, tr, force) {
         channels: channel ? [channel] : [], appliedAt: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }),
         status: tr.querySelector('.br-status').value, recommendation: NOTION_REC_MAP[r.recommendation] || '',
         total: r.total, summary: batchSummary(r), education: cand.education || '', career: cand.career || '', force,
+        checklist: (r.checklist || []).map(x => ({ code: x.code, status: x.status, note: x.note })),   // 카드 본문에 서류 체크리스트를 기록해요
       }),
     });
     const data = await readJsonOrNull(res);

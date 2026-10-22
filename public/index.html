@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-9">
+<html lang="ko" data-app-version="2026.10.21-11">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -431,6 +431,11 @@
             <strong>필수 요건 체크 (참고)</strong>
             <p class="manage-hint" style="margin:2px 0 4px">점수와 별개예요. 이력서에 없으면 "미충족"이 아니라 "확인불가"로 표시하고, 탈락 기준이 아니에요.</p>
             <ul id="resumeRequirements" class="req-list"></ul>
+          </div>
+          <div id="checklistBox" hidden>
+            <strong>서류 체크리스트 (점수 아님)</strong>
+            <p class="manage-hint" style="margin:2px 0 4px">노션 서류심사표를 옮긴 점검표예요. 이력서에 적힌 사실만 보여주고 <strong>점수·추천·합격 여부와 무관</strong>해요. 사진·외모는 보지 않고, 학력은 학교 수준을 평가하지 않고 적힌 사실만 표시해요.</p>
+            <ul id="resumeChecklist" class="req-list"></ul>
           </div>
           <div id="interviewBox">
             <strong>면접에서 확인할 것 (점수 아님)</strong>
@@ -897,11 +902,32 @@
         <h3 class="sch-name-view"></h3>
         <div class="tpl-card-actions">
           <button class="sch-calendar-btn">구글캘린더에 추가</button>
+          <button class="sch-iq-btn" type="button" title="노션 문항 은행과 이력서를 바탕으로 면접 질문을 추천해요">면접 질문 추천</button>
           <button class="sch-edit-btn" data-edit="schedule">수정</button>
           <button class="sch-save-btn" hidden>저장</button>
           <button class="sch-cancel-btn" hidden>취소</button>
           <button class="sch-delete-btn" data-edit="schedule">삭제</button>
         </div>
+      </div>
+
+      <div class="sch-iq-panel" hidden>
+        <div class="iq-head"><strong>면접 질문 추천</strong><button class="sch-iq-close link-btn" type="button">닫기</button></div>
+        <p class="manage-hint iq-intro">노션 문항 은행(필수 15·선택 13)과 노션 지원자 카드의 이력서 평가 요약을 바탕으로 질문을 골라요. 질문은 <strong>참고</strong>예요. 나이·결혼·가족·종교·외모 같은 질문은 만들지 않고, 최종 질문은 면접관이 정해요.</p>
+        <div class="iq-pick"></div>
+        <div class="iq-mode" hidden>
+          <label class="check-chip"><input type="radio" class="iq-mode-ai" name="iqMode" value="ai" checked /> 맞춤 질문을 AI로 만들기</label>
+          <label class="check-chip"><input type="radio" class="iq-mode-prompt" name="iqMode" value="prompt" /> API 없이 (요청문 복사 → 답변 붙여넣기)</label>
+          <button class="iq-run add-btn" type="button">질문 추천받기</button>
+        </div>
+        <p class="status iq-status"></p>
+        <div class="iq-prompt" hidden>
+          <p class="manage-hint">① 아래 요청문을 복사해 Claude 채팅에 붙여넣고 보내세요 ② 답변(JSON)을 아래 칸에 붙여넣고 "질문 가져오기"를 누르세요.</p>
+          <div class="posting-actions"><button class="iq-copy-prompt add-btn" type="button">① 요청문 복사</button></div>
+          <textarea class="iq-prompt-shown" rows="5" readonly hidden aria-label="요청문 (자동 복사가 안 될 때 직접 복사하세요)"></textarea>
+          <textarea class="iq-answer" rows="5" placeholder="Claude의 답변(JSON)을 여기에 붙여넣으세요"></textarea>
+          <button class="iq-import add-btn" type="button">② 질문 가져오기</button>
+        </div>
+        <div class="iq-result" hidden></div>
       </div>
 
       <div class="sch-detail-view">
