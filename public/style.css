@@ -1631,7 +1631,7 @@ body.has-dock .wrap { padding-bottom: 90px; }
 }
 .posting-table th:nth-child(1) { width: 92px; }
 .posting-table th:nth-child(2) { width: 110px; }
-.posting-table th:nth-child(5) { width: 96px; }
+.posting-table th:nth-child(5) { width: 190px; }   /* 상태 칸에 마감일·게시한 곳·노션 지원자 수가 함께 보여서 넓힘 */
 .posting-table th:nth-child(6) { width: 170px; }
 .posting-table td { vertical-align: top; overflow-wrap: anywhere; }
 .posting-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1911,3 +1911,58 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .iq-ans-score { padding: 8px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font-size: 13.5px; font-family: inherit; max-width: 100%; }
 .iq-badge { display: inline-block; margin-left: 6px; padding: 0 8px; font-size: 12px; border-radius: 8px; background: #e3f0e5; color: #2f6b3b; }
 .iq-ans-note { margin: 8px 0 0; }
+
+/* 면접 관리: 지원자 줄의 질문·답변 버튼과 면접 점수 요약 */
+.iq-score-sum { margin: 8px 0 0; font-weight: 600; color: #6b4a1e; }
+.ap-row .ap-iq-btn { white-space: nowrap; }
+
+/* 면접 관리: 지원자 줄 마지막 칸의 버튼(수정·문자·일정·질문·답변·노션)이 좁은 화면에서 줄바꿈되게 */
+.ap-row td:last-child { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+.ap-row td:last-child .add-btn, .ap-row td:last-child .link-btn { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+
+/* 공고 점검: 추천 문구 버튼 (점검 목록의 다른 작은 버튼과 크기를 맞춤) */
+.post-check-list .pc-suggest { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.post-check-list .pc-suggest .add-btn { font-size: 12.5px; padding: 5px 10px; }
+.post-check-list .pc-suggest .link-btn { font-size: 12px; }
+
+/* 공고 상태·게시·마감 */
+.notion-tag.state-open { background: #e3f0e5; color: #2f6b3b; }
+.notion-tag.state-closed { background: #ece9e1; color: #6b6558; }
+.posting-publish { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.pp-channels { display: grid; gap: 8px; margin: 8px 0; }
+.pp-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(140px, 2fr) 140px 90px auto; gap: 6px; align-items: center; }
+.pp-row input { min-width: 0; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 13px; }
+.pp-row input:focus { outline: none; border-color: var(--accent); background: #fff; }
+@media (max-width: 720px) { .pp-row { grid-template-columns: 1fr 1fr; } .pp-row .pp-url { grid-column: 1 / -1; } }
+.pp-chs a { color: var(--accent, #a8552c); }
+
+.posting-table td[data-label="상태"] .manage-hint { font-size: 12px; line-height: 1.45; }
+
+/* 공고 요건 체크: 필수/우대 종류 배지 */
+.req-kind { display: inline-block; margin-right: 6px; padding: 0 7px; font-size: 11.5px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: #6b6558; vertical-align: 1px; }
+.req-kind.kind-must { border-color: #d9b88f; color: #8a5a1f; }
+.req-kind.kind-pref { border-color: #bfd3c4; color: #3f6b4a; }
+
+/* 면접 질문 심화: 옵션 줄·자료 출처·진행안·질문 상세 */
+.iq-opts { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbf9f3; }
+.iq-opts select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font: inherit; font-size: 13px; }
+.iq-opts .iq-extra { flex: 1 1 100%; }
+.iq-opts .iq-extra summary { cursor: pointer; font-size: 13px; color: var(--accent, #a8552c); }
+.iq-opts .iq-extra textarea { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; background: var(--paper); }
+.iq-src, .iq-plan { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; }
+.iq-plan-list { margin: 6px 0 0; padding-left: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 12px; }
+.iq-plan-min { display: inline-block; min-width: 34px; font-weight: 700; color: var(--accent, #a8552c); }
+.iq-type { display: inline-block; margin-right: 6px; padding: 0 7px; font-size: 11.5px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: #6b6558; vertical-align: 1px; }
+.iq-more { margin: 4px 0 2px 24px; font-size: 12.5px; }
+.iq-more summary { cursor: pointer; color: var(--accent, #a8552c); }
+.iq-more .iq-good strong { color: #3f6b4a; }
+.iq-more .iq-watch strong { color: #8a5a1f; }
+@media (max-width: 720px) { .iq-more { margin-left: 8px; } }
+
+/* 서류 합격 선정 · 한 번에 기록 */
+.batch-pickbar { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.batch-pick-chip { margin-right: 6px; }
+.batch-recmsg { display: block; margin-top: 2px; color: #3f6b4a; }
+.batch-recmsg.err { color: #b0432f; }
+
+#batchRecordBtn:disabled { opacity: .5; cursor: not-allowed; }

@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-12';
+const APP_VERSION = '2026.10.21-16';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -134,7 +134,6 @@ const sendView = document.getElementById('sendView');
 const manageView = document.getElementById('manageView');
 const resumeView = document.getElementById('resumeView');
 const postingView = document.getElementById('postingView');
-const applicantsView = document.getElementById('applicantsView')
 const interviewView = document.getElementById('interviewView');
 const companyIntroInput = document.getElementById('companyIntroInput');
 const idealProfileInput = document.getElementById('idealProfileInput');
@@ -658,13 +657,11 @@ function showTab(tab) {
   sendView.hidden = tab !== 'send';
   resumeView.hidden = tab !== 'resume';
   postingView.hidden = tab !== 'posting';
-  applicantsView.hidden = tab !== 'applicants';
   interviewView.hidden = tab !== 'interview';
-  if (tab === 'interview') loadInterviewList(true);
   manageView.hidden = tab !== 'manage';
   if (tab === 'manage') refreshTemplateManageSelect();
   if (tab === 'resume' || tab === 'posting') loadResumeData();
-  if (tab === 'applicants') loadApplicants(true);
+  if (tab === 'interview') loadApplicants(true);   // 면접 관리 = 노션 지원자 목록(예전 지원자 관리) + 면접 질문·답변
   if (tab === 'send') loadTemplates(); // 양식 변경사항 반영
 }
 
@@ -1690,26 +1687,51 @@ function renderEvalOptions() {
 }
 
 // --- 공고 조회 목록 (생성일순 · 팀별) ---
+// 표시 상태: 서버가 계산해 준 state(draft 작성 중 · confirmed 확정 · open 게시중 · closed 마감)를 써요
+const STATE_LABEL = { draft: '작성 중', confirmed: '확정', open: '게시중', closed: '마감' };
+let postingStats = {};   // 공고 id → { total, byStatus } (노션 지원자 수, 비동기로 채움)
+let postingStatsTruncated = false;   // 노션 지원자가 300명을 넘어 일부만 센 경우
+function statsText(p) {
+  const st = postingStats[p.id]; if (!st) return '';
+  if (!st.total) return '노션 지원자 0명';
+  const parts = Object.entries(st.byStatus).map(([k, v]) => `${k} ${v}`).join(' · ');
+  return `노션 지원자 ${st.total}명 (${parts})`;
+}
 function renderPostingList() {
-  let list = postingsAll.filter(p => (!listTeam.value || p.team === listTeam.value) && (!listStatus.value || p.status === listStatus.value));
+  let list = postingsAll.filter(p => (!listTeam.value || p.team === listTeam.value) && (!listStatus.value || (listStatus.value === 'confirmed' ? p.status === 'confirmed' : p.state === listStatus.value)));
   const asc = listSort.value === 'oldest';
   list = list.slice().sort((x, y) => (asc ? 1 : -1) * String(x.createdAt).localeCompare(String(y.createdAt)));
-  const c = list.filter(p => p.status === 'confirmed').length;
-  postingCount.textContent = list.length ? `${list.length}개 (확정 ${c} · 작성 중 ${list.length - c})` : '조건에 맞는 공고가 없어요.';
-  postingBody.innerHTML = list.map(p => `
+  const cnt = k => list.filter(p => p.state === k).length;
+  postingCount.textContent = (list.length ? `${list.length}개 (게시중 ${cnt('open')} · 확정 ${cnt('confirmed')} · 마감 ${cnt('closed')} · 작성 중 ${cnt('draft')})` : '조건에 맞는 공고가 없어요.') + (postingStatsTruncated ? ' · 노션 지원자가 많아 최근 300명만 세었어요(지원자 수가 실제보다 적을 수 있어요).' : '');
+  postingBody.innerHTML = list.map(p => {
+    const state = p.state || (p.status === 'confirmed' ? 'confirmed' : 'draft');
+    const chs = (p.channels || []).map(c => c.url ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.name)}</a>` : escapeHtml(c.name)).join(' · ');
+    const sTxt = statsText(p);
+    return `
     <tr data-id="${escapeHtml(p.id)}">
       <td data-label="생성일">${fmtDate(p.createdAt)}</td>
       <td data-label="팀">${escapeHtml(p.team)}</td>
       <td data-label="포지션"><strong>${escapeHtml(p.position)}</strong>${p.brand ? ` <span class="notion-tag">${escapeHtml(p.brand)}</span>` : ''}<div class="manage-hint" style="margin:2px 0 0">${escapeHtml(p.jdPreview)}</div></td>
       <td data-label="근무 조건">${escapeHtml(conditionText(p))}</td>
-      <td data-label="상태"><span class="notion-tag${p.status === 'confirmed' ? ' tag-ok' : ''}">${p.status === 'confirmed' ? '확정' : '작성 중'}</span>${p.confirmedAt ? `<div class="manage-hint" style="margin:2px 0 0">확정 ${fmtDate(p.confirmedAt)}</div>` : ''}</td>
+      <td data-label="상태"><span class="notion-tag state-${state}${state === 'confirmed' || state === 'open' ? ' tag-ok' : ''}">${STATE_LABEL[state]}</span>${p.confirmedAt ? `<div class="manage-hint" style="margin:2px 0 0">확정 ${fmtDate(p.confirmedAt)}</div>` : ''}${p.closedAt ? `<div class="manage-hint" style="margin:2px 0 0">마감 처리 ${escapeHtml(p.closedAt)}</div>` : (state === 'closed' && p.applyEnd ? `<div class="manage-hint" style="margin:2px 0 0">접수 마감 ${escapeHtml(p.applyEnd)}</div>` : '')}${chs ? `<div class="manage-hint pp-chs" style="margin:2px 0 0">게시: ${chs}</div>` : ''}${sTxt ? `<div class="manage-hint pp-stats" style="margin:2px 0 0">${escapeHtml(sTxt)}</div>` : ''}</td>
       <td class="posting-row-actions">
         <button type="button" data-act="view" data-id="${escapeHtml(p.id)}">보기</button>
         ${p.status === 'confirmed' ? `<button type="button" data-act="use" data-edit="resume" data-id="${escapeHtml(p.id)}">평가에 사용</button>` : ''}
+        ${p.status === 'confirmed' ? `<button type="button" data-act="publish" data-edit="resume" data-id="${escapeHtml(p.id)}">게시·마감</button>` : ''}
         <button type="button" data-act="edit" data-edit="resume" data-id="${escapeHtml(p.id)}">수정</button>
         <button type="button" data-act="del" data-edit="resume" data-id="${escapeHtml(p.id)}">삭제</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+}
+// 노션 지원자 수는 목록을 그린 뒤 한 번만 불러와요(노션이 없거나 실패해도 목록은 그대로예요)
+async function loadPostingStats() {
+  try {
+    const st = await ensureNotionStatus(); if (!st || !st.configured) return;
+    const res = await fetch('/api/postings/stats'); const j = await readJsonOrNull(res);
+    if (!j || !res.ok || !j.success) return;
+    postingStats = j.stats || {}; postingStatsTruncated = !!j.truncated; renderPostingList();
+  } catch { /* 지원자 수를 못 불러와도 공고 목록은 쓸 수 있어요 */ }
 }
 [listTeam, listStatus, listSort].forEach(el => el.addEventListener('change', renderPostingList));
 
@@ -1728,6 +1750,7 @@ async function loadPostings() {
     renderPositionList();
     renderEvalOptions();
     renderPostingList();
+    loadPostingStats();   // 노션 지원자 수(비동기)
   } catch (err) {
     postingCount.textContent = '공고를 불러오지 못했어요: ' + (err.message || '');
   }
@@ -1920,7 +1943,7 @@ document.getElementById('cancelNoticeBtn').addEventListener('click', () => {
 });
 document.getElementById('saveNoticeBtn').addEventListener('click', () => putNotice(postNotice.value, '공고 안내를 저장했어요. 다음에 만드는 AI 초안부터 맨 끝에 붙어요.'));
 document.getElementById('resetNoticeBtn').addEventListener('click', () => {
-  if (!confirm('공고 안내를 처음 문구(오픈한 채용 공고 기준)로 되돌릴까요?\n직접 고친 내용은 사라져요.')) return;
+  if (!confirm('공고 안내를 처음 문구(오픈한 채용 공고 기준 + 채용서류 반환·보관 안내)로 되돌릴까요?\n직접 고친 내용은 사라져요.')) return;
   putNotice(postingDefaults.defaultCommonNotice, '처음 문구로 되돌렸어요.');
 });
 
@@ -2436,13 +2459,17 @@ document.getElementById('saraminBox').addEventListener('toggle', e => { if (e.ta
 // 맞춤 질문은 버튼을 눌렀을 때만 AI를 불러요(자동으로 비용이 들지 않게). API 없이 쓰려면 요청문을 복사해 Claude 채팅에 붙여넣어요.
 // 공용 패널: 일정 카드(opts.btn으로 열고 이름·연락처로 지원자 찾기)와 면접 관리 탭(opts.preset으로 지원자를 바로 지정)이 같은 코드를 써요.
 // 마크업은 <template id="iqPanelTpl">에서 복제해요. 맞춤 질문은 버튼을 눌렀을 때만 AI를 불러요(자동으로 비용이 들지 않게).
+// 요건별 확인 질문을 질문 목록 항목으로: 노션 표에 맞춤 질문처럼 쓰이도록 기준 칸에 어떤 요건인지(필수 R1 + 원문)를 함께 남겨요
+function toReqItem(q) {
+  return { question: q.question, criteria: `[${q.kind} ${q.reqId}] ${q.requirement}${q.criteria ? ' — ' + q.criteria : ''}`.slice(0, 280), basis: '', reqId: q.reqId, kind: q.kind, requirement: q.requirement, isReq: true };
+}
 function mountInterviewPanel(host, opts) {
   const tpl = document.getElementById('iqPanelTpl'); if (!tpl || !host) return null;
   host.innerHTML = ''; host.appendChild(tpl.content.cloneNode(true));
   const panel = host.querySelector('.iq-panel'); const btn = opts.btn || null; const s = opts.schedule || {};
   const $ = sel => panel.querySelector(sel);
-  const statusEl = $('.iq-status'), pickEl = $('.iq-pick'), modeEl = $('.iq-mode'), resultEl = $('.iq-result'), promptBox = $('.iq-prompt');
-  let applicant = null, data = null, custom = [], existing = new Map(), answers = new Map(), dirty = false;
+  const statusEl = $('.iq-status'), pickEl = $('.iq-pick'), modeEl = $('.iq-mode'), optsEl = $('.iq-opts'), resultEl = $('.iq-result'), promptBox = $('.iq-prompt');
+  let applicant = null, data = null, custom = [], reqq = [], facts = [], scens = [], planInfo = null, srcInfo = null, existing = new Map(), answers = new Map(), dirty = false;
   const api = { isDirty: () => dirty, applicant: () => applicant };
   const setStatus = (m, c) => { statusEl.textContent = m || ''; statusEl.className = 'status iq-status' + (c ? ' ' + c : ''); };
   const digits = v => String(v || '').replace(/\D/g, '');
@@ -2471,20 +2498,22 @@ function mountInterviewPanel(host, opts) {
   $('.sch-iq-close').addEventListener('click', () => { if (dirty && !confirm('보내지 않은 답변이 있어요. 닫으면 작성한 답변이 사라져요.\n\n그래도 닫을까요?')) return; markDirty(false); panel.hidden = true; if (opts.onClose) opts.onClose(); });
   function showMode() {
     setStatus(`노션 지원자: ${applicant.name}${applicant.team ? ' · ' + applicant.team : ''}${applicant.job ? ' · ' + applicant.job : ''}. 방식을 고르고 "질문 추천받기"를 누르세요.`, 'ok');
-    modeEl.hidden = false;
+    modeEl.hidden = false; optsEl.hidden = false;
   }
+  const extraTa = $('.iq-extra-text'), extraCount = $('.iq-extra-count');
+  extraTa.addEventListener('input', () => { extraCount.textContent = `${extraTa.value.length} / 8000자`; });
   $('.iq-run').addEventListener('click', async () => {
     if (!applicant) return;
     const mode = $('.iq-mode-prompt').checked ? 'prompt' : 'ai';
     if (dirty && !confirm('보내지 않은 답변이 있어요. 질문을 다시 만들면 작성한 답변이 사라져요.\n\n그래도 다시 만들까요?')) return;
-    answers = new Map(); markDirty(false);
+    answers = new Map(); reqq = []; facts = []; scens = []; planInfo = null; srcInfo = null; markDirty(false);
     const run = $('.iq-run'); run.disabled = true; setStatus(mode === 'ai' ? 'AI가 맞춤 질문을 만드는 중... (노션 문항은 바로 보여드려요)' : '요청문을 만드는 중...'); resultEl.hidden = true; promptBox.hidden = true; custom = [];
     try {
-      const res = await fetch('/api/interview/questions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, mode }) });
+      const res = await fetch('/api/interview/questions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, mode, stage: $('.iq-stage').value, minutes: Number($('.iq-minutes').value), withResume: $('.iq-with-resume').checked, extra: extraTa.value }) });
       const j = await readJsonOrNull(res);
       if (!j) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
       if (!res.ok || !j.success) throw new Error(j.error || '질문을 만들지 못했어요.');
-      data = j; custom = j.custom || [];
+      data = j; custom = j.custom || []; reqq = (j.reqQuestions || []).map(toReqItem); facts = j.factChecks || []; scens = j.scenarios || []; planInfo = j.plan || null; srcInfo = { sources: j.sources || null, notes: j.notes || [] };
       const table = await loadExisting();   // 노션 채용 문항 표에 이미 있는 답변·점수를 미리 채워요
       if (mode === 'prompt') { promptBox.hidden = false; promptBox.dataset.prompt = j.prompt; }
       renderResult();
@@ -2492,9 +2521,10 @@ function mountInterviewPanel(host, opts) {
       if (!j.applicant.hasSummary) notes.push('이 지원자는 앱에서 남긴 이력서 평가 요약이 없어서 직무 기준으로만 맞춤 질문을 만들어요');
       if (j.matchedPosition) notes.push(`확정 공고("${j.matchedPosition}")의 요건을 참고했어요`);
       if (j.dropped) notes.push(`나이·가족 같은 주제의 질문 ${j.dropped}개는 뺐어요`);
+      (j.notes || []).forEach(x => notes.push(x.replace(/[.。]$/, '')));
       if (table && table.found === false && table.note) notes.push(table.note);
       else if (table && table.found) notes.push('노션 채용 문항 표에 답변을 바로 쓸 수 있어요');
-      setStatus(mode === 'ai' ? (custom.length ? `맞춤 질문 ${custom.length}개를 만들었어요.` : '맞춤 질문을 만들지 못했어요. 문항 은행 질문은 그대로 쓸 수 있어요.') + (notes.length ? ' ' + notes.join(' · ') + '.' : '') : '요청문을 만들었어요. 아래 ①②를 진행하세요.' + (notes.length ? ' ' + notes.join(' · ') + '.' : ''), 'ok');
+      setStatus(mode === 'ai' ? (custom.length ? `맞춤 질문 ${custom.length}개${facts.length ? `, 사실 확인 질문 ${facts.length}개` : ''}${scens.length ? `, 직무 상황 질문 ${scens.length}개` : ''}를 만들었어요.` : '맞춤 질문을 만들지 못했어요. 문항 은행 질문은 그대로 쓸 수 있어요.') + (notes.length ? ' ' + notes.join(' · ') + '.' : '') : '요청문을 만들었어요. 아래 ①②를 진행하세요.' + (notes.length ? ' ' + notes.join(' · ') + '.' : ''), 'ok');
     } catch (err) { setStatus(err.message || '질문을 만드는 중 오류가 발생했어요.', 'err'); }
     finally { run.disabled = false; }
   });
@@ -2507,11 +2537,11 @@ function mountInterviewPanel(host, opts) {
     const answer = $('.iq-answer').value;
     if (!answer.trim()) { setStatus('Claude의 답변을 먼저 붙여넣어주세요.', 'err'); return; }
     try {
-      const res = await fetch('/api/interview/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      const res = await fetch('/api/interview/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer, applicantId: applicant ? applicant.id : '' }) });
       const j = await readJsonOrNull(res);
       if (!j) throw new Error('서버가 응답하지 못했어요.');
       if (!res.ok || !j.success) throw new Error(j.error || '가져오지 못했어요.');
-      custom = j.custom; renderResult(); setStatus(`맞춤 질문 ${custom.length}개를 가져왔어요.${j.dropped ? ` (나이·가족 같은 주제 ${j.dropped}개는 뺐어요)` : ''}`, 'ok');
+      custom = j.custom || []; facts = j.factChecks || []; scens = j.scenarios || []; if (Array.isArray(j.reqQuestions) && j.reqQuestions.length) reqq = j.reqQuestions.map(toReqItem); renderResult(); setStatus(`맞춤 질문 ${custom.length}개${reqq.length ? `와 공고 요건 확인 질문 ${reqq.length}개` : ''}를 가져왔어요.${j.dropped ? ` (나이·가족 같은 주제 ${j.dropped}개는 뺐어요)` : ''}`, 'ok');
     } catch (err) { setStatus(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
   });
   // 노션 "채용 문항" 표에 이미 있는 답변·점수를 불러와요(있으면 미리 채우고, 이 화면이 불러온 값을 base로 기억해 충돌을 정확히 판단해요)
@@ -2529,30 +2559,50 @@ function mountInterviewPanel(host, opts) {
     if (!items.length) return '';
     return `<div class="iq-group"><strong>${escapeHtml(title)}</strong>${hint ? `<span class="manage-hint" style="margin:0 0 0 6px">${escapeHtml(hint)}</span>` : ''}<ul class="iq-list">` + items.map((q, i) => { const st = stateOf(q); return `
       <li data-kind="${kind}" data-i="${i}"><label><input type="checkbox" class="iq-chk" data-kind="${kind}" data-i="${i}"${checked ? ' checked' : ''} />
-        <span class="iq-q">${q.no ? `<span class="iq-no">${escapeHtml(q.no)}</span>` : ''}${escapeHtml(q.question)}${st.fromNotion ? ' <span class="iq-badge">노션에 기록 있음</span>' : ''}</span></label>
-        ${q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : ''}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : ''}
+        <span class="iq-q">${q.isReq ? `<span class="req-kind kind-${q.kind === '우대' ? 'pref' : 'must'}">${escapeHtml(q.kind)} ${escapeHtml(q.reqId)}</span>` : (q.no ? `<span class="iq-no">${escapeHtml(q.no)}</span>` : '')}${q.type && ['경력 검증', '요건 확인', '사실 확인', '직무 상황', '인재상', '동기·조건'].includes(q.type) ? `<span class="iq-type">${escapeHtml(q.type)}</span>` : ''}${escapeHtml(q.question)}${st.fromNotion ? ' <span class="iq-badge">노션에 기록 있음</span>' : ''}</span></label>
+        ${q.isReq ? `<div class="iq-sub">요건: ${escapeHtml(q.requirement)}</div>` : (q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : '')}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : ''}${(q.followUps && q.followUps.length) || (q.goodSigns && q.goodSigns.length) || (q.watchSigns && q.watchSigns.length) ? `<details class="iq-more"><summary>꼬리질문 · 답변 평가 신호</summary>${q.followUps && q.followUps.length ? `<div class="iq-sub"><strong>꼬리질문</strong> ${q.followUps.map(escapeHtml).join(' / ')}</div>` : ''}${q.goodSigns && q.goodSigns.length ? `<div class="iq-sub iq-good"><strong>좋은 답의 신호</strong> ${q.goodSigns.map(escapeHtml).join(' / ')}</div>` : ''}${q.watchSigns && q.watchSigns.length ? `<div class="iq-sub iq-watch"><strong>주의 신호</strong> ${q.watchSigns.map(escapeHtml).join(' / ')}</div>` : ''}<div class="manage-hint" style="margin:2px 0 0">신호는 답을 들으며 관찰하는 참고용이에요. 합격·불합격 기준이 아니에요.</div></details>` : ''}
         <div class="iq-ans"${checked ? '' : ' hidden'}>
           <textarea class="iq-ans-text" rows="2" maxlength="6000" placeholder="면접 답변을 적어요 (노션 채용 문항 표의 '답변'에 들어가요)" aria-label="답변">${escapeHtml(st.answer)}</textarea>
           <select class="iq-ans-score" aria-label="점수(⭐)"><option value="0">점수 선택</option>${[1,2,3,4,5].map(n => `<option value="${n}"${st.score === n ? ' selected' : ''}>${'⭐'.repeat(n)}</option>`).join('')}</select>
         </div></li>`; }).join('') + '</ul></div>';
   }
+  // 이번 질문에 쓴 자료와 면접 진행안(시간 배분)을 결과 맨 위에 보여줘요
+  function planHtml() {
+    const s = srcInfo && srcInfo.sources, notes = (srcInfo && srcInfo.notes) || [];
+    const used = [];
+    if (s) {
+      if (s.summary) used.push('노션 평가 요약');
+      if (s.posting) used.push('확정 공고 요건');
+      if (s.ideal) used.push('공통 인재상');
+      if (s.checklist) used.push(`서류 점검 "확인 필요" ${s.checklist}건`);
+      if (s.resume && s.resume.used) used.push(`이력서 PDF ${s.resume.files.length}개(${s.resume.files.map(escapeHtml).join(', ')})`);
+      if (s.extra) used.push('추가 자료');
+    }
+    const srcBox = s ? `<div class="iq-src"><strong>이번 질문에 쓴 자료</strong> ${used.length ? used.map(x => `<span class="iq-badge">${x}</span>`).join(' ') : '<span class="manage-hint">없음</span>'}${s.resume && s.resume.skipped && s.resume.skipped.length ? `<div class="manage-hint">못 읽은 파일: ${s.resume.skipped.map(escapeHtml).join(' · ')}</div>` : ''}${notes.length ? `<div class="manage-hint">${notes.map(escapeHtml).join(' · ')}</div>` : ''}</div>` : '';
+    const planBox = planInfo && planInfo.timeline ? `<div class="iq-plan"><strong>면접 진행안</strong> <span class="manage-hint" style="margin:0">${escapeHtml(planInfo.stage)} 면접 · ${planInfo.minutes}분 (참고용 시간 배분이에요)</span><ol class="iq-plan-list">${planInfo.timeline.map(r => `<li><span class="iq-plan-min">${r.minutes}분</span> ${escapeHtml(r.label)}</li>`).join('')}</ol></div>` : '';
+    return srcBox + planBox;
+  }
   function renderResult() {
     if (!data) return;
     resultEl.hidden = false;
     const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
-    resultEl.innerHTML =
-      group('이력서 맞춤 질문', 'AI가 지원자의 이력서 평가 요약을 근거로 만든 질문', custom, true, 'custom') +
+    resultEl.innerHTML = planHtml() +
+      group('공고 요건 확인 질문', '공고의 필수·우대 요건마다 하나씩 (면접에서 어떻게 했는지 확인)', reqq, true, 'reqq') +
+        group('이력서 맞춤 질문', 'AI가 지원자의 이력서 평가 요약을 근거로 만든 질문', custom, true, 'custom') +
+      group('직무 상황 질문', '공고의 업무를 바탕으로 한 상황 질문 (정답보다 판단 근거와 우선순위를 확인)', scens, true, 'scen') +
+      group('사실 확인 질문', '이력서에서 확인이 필요한 사실을 중립적으로 묻는 질문 (점수가 아니라 사실 확인)', facts, true, 'fact') +
       group('필수 질문', `노션 문항 ${data.required.length}개`, data.required, true, 'required') +
       group('추천 선택 질문', '직무에 어울리는 노션 선택 문항', data.suggested || [], true, 'suggested') +
       group('오프닝(인사)', '면접 시작 때', data.opening || [], false, 'opening') +
       group('그 밖의 선택 질문', '필요하면 체크하세요', more, false, 'more') +
       `<div class="posting-actions iq-actions"><button type="button" class="iq-copy-sel add-btn">선택한 질문 복사</button><button type="button" class="iq-save add-btn" data-edit="resume">노션 카드에 질문 기록</button><button type="button" class="iq-send-ans add-btn">답변을 노션에 전송</button><span class="manage-hint iq-count"></span></div>
+       <p class="iq-score-sum" aria-live="polite"></p>
        <p class="manage-hint iq-ans-note">체크한 질문 아래에 답변과 점수를 적고 "답변을 노션에 전송"을 누르세요. 노션 「채용 문항」 표의 해당 질문 행에 쓰이고, 표에 없는 질문(맞춤 질문)은 새 행으로 추가돼요. 표가 없는 카드는 카드 본문에 기록해요. 노션에 이미 다른 답변이 있으면 덮어쓰기 전에 물어봐요.</p>`;
     resultEl.querySelectorAll('.iq-chk').forEach(c => c.addEventListener('change', () => { const li = c.closest('li'); li.querySelector('.iq-ans').hidden = !c.checked; updateCount(); }));
     resultEl.querySelectorAll('.iq-list li').forEach(li => {
       const grp = li.dataset.kind; const idx = Number(li.dataset.i); const q = listOf(grp)[idx]; if (!q) return;
       li.querySelector('.iq-ans-text').addEventListener('input', e => { stateOf(q).answer = e.target.value; markDirty(true); });
-      li.querySelector('.iq-ans-score').addEventListener('change', e => { stateOf(q).score = Number(e.target.value) || 0; markDirty(true); });
+      li.querySelector('.iq-ans-score').addEventListener('change', e => { stateOf(q).score = Number(e.target.value) || 0; markDirty(true); updateCount(); });
     });
     updateCount();
     resultEl.querySelector('.iq-copy-sel').addEventListener('click', copySelected);
@@ -2561,19 +2611,26 @@ function mountInterviewPanel(host, opts) {
   }
   function listOf(kind) {
     const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
-    return { custom, required: data.required, suggested: data.suggested || [], opening: data.opening || [], more }[kind] || [];
+    return { custom, reqq, scen: scens, fact: facts, required: data.required, suggested: data.suggested || [], opening: data.opening || [], more }[kind] || [];
   }
   function selected() {
     const pick = kind => [...resultEl.querySelectorAll(`.iq-chk[data-kind="${kind}"]:checked`)].map(c => Number(c.dataset.i));
     return {
-      custom: pick('custom').map(i => custom[i]).filter(Boolean), required: pick('required').map(i => data.required[i]).filter(Boolean),
+      custom: [...pick('reqq').map(i => reqq[i]), ...pick('custom').map(i => custom[i]), ...pick('scen').map(i => scens[i]), ...pick('fact').map(i => facts[i])].filter(Boolean), required: pick('required').map(i => data.required[i]).filter(Boolean),
       suggested: [...pick('suggested').map(i => (data.suggested || [])[i]), ...pick('more').map(i => listOf('more')[i])].filter(Boolean), opening: pick('opening').map(i => (data.opening || [])[i]).filter(Boolean),
     };
   }
-  function updateCount() { const q = selected(); const n = q.custom.length + q.required.length + q.suggested.length + q.opening.length; const filled = [...q.custom, ...q.required, ...q.suggested, ...q.opening].filter(x => { const st = stateOf(x); return st.answer.trim() || st.score; }).length; resultEl.querySelector('.iq-count').textContent = `${n}개 선택 · 답변/점수 ${filled}개 작성`; }
+  // 면접 점수 요약: 점수(⭐)를 매긴 모든 질문(노션에서 불러온 값 포함)의 평균이에요. 서버에 저장하지 않고 화면에서만 계산해요.
+  function scoreSummary() {
+    const all = [...reqq, ...custom, ...scens, ...facts, ...data.required, ...(data.suggested || []), ...(data.opening || []), ...listOf('more')];
+    const seen = new Set(); const sc = [];
+    all.forEach(x => { const k = rowKey(x); if (seen.has(k)) return; seen.add(k); const v = stateOf(x).score; if (v) sc.push(v); });
+    return sc.length ? { n: sc.length, avg: Math.round(sc.reduce((a, b) => a + b, 0) / sc.length * 10) / 10 } : null;
+  }
+  function updateCount() { const q = selected(); const n = q.custom.length + q.required.length + q.suggested.length + q.opening.length; const filled = [...q.custom, ...q.required, ...q.suggested, ...q.opening].filter(x => { const st = stateOf(x); return st.answer.trim() || st.score; }).length; const sm = scoreSummary(); resultEl.querySelector('.iq-count').textContent = `${n}개 선택 · 답변/점수 ${filled}개 작성`; const box = resultEl.querySelector('.iq-score-sum'); if (box) box.textContent = sm ? `면접 점수 평균 ${sm.avg.toFixed(1)} / 5 (점수를 매긴 질문 ${sm.n}개)` : '아직 점수를 매긴 질문이 없어요'; }
   async function copySelected() {
     const q = selected(); const lines = [];
-    const add = (t, list) => { if (list.length) { lines.push(`[${t}]`); list.forEach((x, i) => lines.push(`${i + 1}. ${x.question}${x.criteria ? ` (확인: ${x.criteria})` : ''}`)); lines.push(''); } };
+    const add = (t, list) => { if (list.length) { lines.push(`[${t}]`); list.forEach((x, i) => { lines.push(`${i + 1}. ${x.type ? `[${x.type}] ` : ''}${x.question}${x.criteria ? ` (확인: ${x.criteria})` : ''}`); if (x.followUps && x.followUps.length) lines.push(`   - 꼬리질문: ${x.followUps.join(' / ')}`); if (x.goodSigns && x.goodSigns.length) lines.push(`   - 좋은 답: ${x.goodSigns.join(' / ')}`); if (x.watchSigns && x.watchSigns.length) lines.push(`   - 주의: ${x.watchSigns.join(' / ')}`); }); lines.push(''); } };
     add('오프닝', q.opening); add('이력서 맞춤 질문', q.custom); add('필수 질문', q.required); add('선택 질문', q.suggested);
     if (!lines.length) { setStatus('복사할 질문을 하나 이상 골라주세요.', 'err'); return; }
     let ok = false; try { await navigator.clipboard.writeText(lines.join('\n').trim()); ok = true; } catch { /* 권한이 없으면 안내만 */ }
@@ -2628,53 +2685,10 @@ function setupInterviewPanel(card, s) {
 
 // ---------- 면접 관리 탭 ----------
 // 노션 지원자 목록에서 면접자를 고르면 공용 면접 질문 패널(mountInterviewPanel)을 그 지원자로 바로 열어요.
-let ivPanel = null, ivCursor = '', ivLoaded = false;
+let ivPanel = null;
 function interviewDirty() { return !!(ivPanel && ivPanel.isDirty()); }
 window.addEventListener('beforeunload', e => { if (interviewDirty()) { e.preventDefault(); e.returnValue = ''; } });
-const ivBody = document.getElementById('ivBody'), ivStatusMsg = document.getElementById('ivStatusMsg'), ivMoreBtn = document.getElementById('ivMoreBtn');
 const ivDetail = document.getElementById('ivDetail');
-function ivMsg(m, c) { ivStatusMsg.textContent = m || ''; ivStatusMsg.className = 'status' + (c ? ' ' + c : ''); }
-async function loadInterviewList(initial) {
-  if (initial && ivLoaded) return;
-  const st = await ensureNotionStatus();
-  if (!st || !st.configured) { ivBody.innerHTML = '<tr><td colspan="6" class="empty-row">노션이 연결돼 있지 않아요. 노션 연결을 확인해주세요.</td></tr>'; ivMsg('노션이 연결돼 있지 않아서 지원자 목록을 불러올 수 없어요.', 'err'); return; }
-  fillIvTeams();
-  await fetchInterviewList(true);
-}
-function fillIvTeams() {
-  const sel = document.getElementById('ivTeam'); if (sel.options.length > 1) return;
-  const teams = (notionStatus && notionStatus.options && notionStatus.options.teams) || [];
-  teams.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
-}
-async function fetchInterviewList(reset) {
-  if (reset) { ivCursor = ''; ivBody.innerHTML = '<tr><td colspan="6" class="empty-row">불러오는 중...</td></tr>'; }
-  ivMsg('');
-  const params = new URLSearchParams({ status: document.getElementById('ivStatus').value, pageSize: '30' });
-  const team = document.getElementById('ivTeam').value; if (team) params.set('team', team);
-  const q = document.getElementById('ivSearch').value.trim(); if (q) params.set('q', q);
-  if (!reset && ivCursor) params.set('cursor', ivCursor);
-  try {
-    const res = await fetch('/api/notion/applicants?' + params.toString()); const j = await readJsonOrNull(res);
-    if (!j) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
-    if (!res.ok) throw new Error(j.error || '지원자 목록을 불러오지 못했어요.');
-    const list = j.applicants || [];
-    if (reset) ivBody.innerHTML = '';
-    if (reset && !list.length) ivBody.innerHTML = '<tr><td colspan="6" class="empty-row">조건에 맞는 지원자가 없어요.</td></tr>';
-    list.forEach(x => {
-      const tr = document.createElement('tr'); tr.dataset.id = x.id;
-      const when = [x.interview1 && `1차 ${formatSchedule(x.interview1)}`, x.interview2 && `2차 ${formatSchedule(x.interview2)}`].filter(Boolean).join(' / ') || '-';
-      tr.innerHTML = `<td data-label="이름">${escapeHtml(x.name)}</td><td data-label="팀">${escapeHtml(x.team || '-')}</td><td data-label="지원직무">${escapeHtml(x.job || '-')}</td><td data-label="면접상태">${escapeHtml(x.status || '-')}</td><td data-label="면접일">${escapeHtml(when)}</td><td><button type="button" class="iv-pick-btn add-btn">질문 만들기</button></td>`;
-      tr._applicant = x; ivBody.appendChild(tr);
-    });
-    ivCursor = j.nextCursor || ''; ivMoreBtn.hidden = !(j.hasMore && ivCursor); ivLoaded = true;
-  } catch (err) { ivMsg(err.message || '지원자 목록을 불러오는 중 오류가 발생했어요.', 'err'); if (reset) ivBody.innerHTML = '<tr><td colspan="6" class="empty-row">불러오지 못했어요.</td></tr>'; }
-}
-ivBody.addEventListener('click', e => {
-  const b = e.target.closest('.iv-pick-btn'); if (!b) return;
-  const x = b.closest('tr')._applicant; if (!x) return;
-  if (interviewDirty() && !confirm('보내지 않은 답변이 있어요. 다른 지원자를 고르면 작성한 답변이 사라져요.\n\n그래도 바꿀까요?')) return;
-  openInterviewFor(x);
-});
 async function openInterviewFor(x) {
   ivDetail.hidden = false;
   document.getElementById('ivDetailTitle').textContent = `${x.name} · ${x.team || '팀 없음'}${x.job ? ' · ' + x.job : ''}`;
@@ -2690,13 +2704,69 @@ async function openInterviewFor(x) {
     }
   } catch { /* 요약을 못 불러와도 질문은 만들 수 있어요 */ }
 }
-document.getElementById('ivRefreshBtn').addEventListener('click', () => fetchInterviewList(true));
-document.getElementById('ivTeam').addEventListener('change', () => fetchInterviewList(true));
-document.getElementById('ivStatus').addEventListener('change', () => fetchInterviewList(true));
-let ivTimer = null;
-document.getElementById('ivSearch').addEventListener('input', () => { clearTimeout(ivTimer); ivTimer = setTimeout(() => fetchInterviewList(true), 400); });
-ivMoreBtn.addEventListener('click', () => fetchInterviewList(false));
 document.getElementById('ivDetailClose').addEventListener('click', () => { if (interviewDirty() && !confirm('보내지 않은 답변이 있어요. 닫으면 작성한 답변이 사라져요.\n\n그래도 닫을까요?')) return; ivDetail.hidden = true; ivPanel = null; document.getElementById('ivPanelHost').innerHTML = ''; });
+
+// ---------- 게시·마감 관리 (공고를 올린 곳과 마감일) ----------
+const ppBox = document.getElementById('postingPublish'), ppChannels = document.getElementById('ppChannels'), ppStatus = document.getElementById('ppStatus');
+let ppId = '', ppDirty = false;
+const setPpStatus = (m, c) => { ppStatus.textContent = m || ''; ppStatus.className = 'status' + (c ? ' ' + c : ''); };
+const CHANNEL_PRESETS = ['사람인', '잡코리아', '원티드', '링크드인', '자사 홈페이지', '기타'];
+function ppRow(c = {}) {
+  const div = document.createElement('div'); div.className = 'pp-row';
+  div.innerHTML = `
+    <input class="pp-name" list="ppPresets" maxlength="20" placeholder="게시한 곳 (예: 사람인)" aria-label="게시한 곳" value="${escapeHtml(c.name || '')}" />
+    <input class="pp-url" type="url" maxlength="300" placeholder="공고 주소 (https://…)" aria-label="공고 주소" value="${escapeHtml(c.url || '')}" />
+    <input class="pp-date" type="date" aria-label="게시일" value="${escapeHtml(c.postedAt || '')}" />
+    <input class="pp-cnt" type="number" min="0" max="99999" step="1" placeholder="지원자 수" aria-label="지원자 수(채널에서 확인한 숫자)" value="${c.applicants ? escapeHtml(String(c.applicants)) : ''}" />
+    <button type="button" class="link-btn pp-del" aria-label="이 게시한 곳 삭제">삭제</button>`;
+  div.querySelectorAll('input').forEach(i => i.addEventListener('input', () => { ppDirty = true; }));
+  div.querySelector('.pp-del').addEventListener('click', () => { div.remove(); ppDirty = true; });
+  return div;
+}
+if (!document.getElementById('ppPresets')) { const dl = document.createElement('datalist'); dl.id = 'ppPresets'; dl.innerHTML = CHANNEL_PRESETS.map(n => `<option value="${n}"></option>`).join(''); document.body.appendChild(dl); }
+function ppRender(p) {
+  ppChannels.innerHTML = ''; (p.channels || []).forEach(c => ppChannels.appendChild(ppRow(c)));
+  document.getElementById('ppTitle').textContent = `게시·마감 관리 · ${p.team} · ${p.position} · ${STATE_LABEL[p.state] || ''}`;
+  const closedManually = !!p.closedAt;
+  document.getElementById('ppCloseBtn').hidden = closedManually; document.getElementById('ppReopenBtn').hidden = !closedManually;
+  ppDirty = false;
+}
+async function openPublishEditor(id) {
+  if (ppDirty && ppId !== id && !confirm('저장하지 않은 게시 정보가 있어요. 다른 공고를 열면 사라져요.\n\n그래도 열까요?')) return;
+  try {
+    const p = await fetchPosting(id); ppId = id; ppRender(p); ppBox.hidden = false; setPpStatus('');
+    ppBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) { setPostStatus(err.message || '공고를 불러오지 못했어요.', 'err'); }
+}
+function ppCollect() {
+  return [...ppChannels.querySelectorAll('.pp-row')].map(r => ({ name: r.querySelector('.pp-name').value, url: r.querySelector('.pp-url').value, postedAt: r.querySelector('.pp-date').value, applicants: r.querySelector('.pp-cnt').value }));
+}
+async function ppSave(extra, okMsg) {
+  if (!ppId) return;
+  const body = { channels: ppCollect(), ...extra };
+  const btns = ['ppSaveBtn', 'ppCloseBtn', 'ppReopenBtn'].map(i => document.getElementById(i)); btns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await fetch('/api/postings/' + encodeURIComponent(ppId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await readJsonOrNull(res);
+    if (!data) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok) throw new Error(data.error || '저장하지 못했어요.');
+    ppRender(data.posting); setPpStatus(okMsg || '저장했어요.', 'ok');
+    await loadPostings();   // 목록의 상태·게시한 곳·마감일을 새로 보여줘요
+  } catch (err) { setPpStatus(err.message || '저장 중 오류가 발생했어요.', 'err'); }
+  finally { btns.forEach(b => { b.disabled = false; }); }
+}
+document.getElementById('ppAddBtn').addEventListener('click', () => {
+  if (ppChannels.querySelectorAll('.pp-row').length >= 6) { setPpStatus('게시한 곳은 6개까지 입력할 수 있어요.', 'err'); return; }
+  const row = ppRow(); ppChannels.appendChild(row); ppDirty = true; row.querySelector('.pp-name').focus();
+});
+document.getElementById('ppSaveBtn').addEventListener('click', () => ppSave({}, '저장했어요. 게시한 곳이 있으면 목록에 "게시중"으로 보여요.'));
+document.getElementById('ppCloseBtn').addEventListener('click', () => {
+  if (!confirm('이 공고를 마감 처리할까요?\n마감해도 이력서 평가는 계속 할 수 있어요. 나중에 "마감 취소"로 되돌릴 수 있어요.')) return;
+  ppSave({ closedAt: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) }, '마감 처리했어요.');
+});
+document.getElementById('ppReopenBtn').addEventListener('click', () => ppSave({ closedAt: '' }, '마감을 취소했어요.'));
+document.getElementById('ppClose').addEventListener('click', () => { if (ppDirty && !confirm('저장하지 않은 게시 정보가 있어요. 닫으면 사라져요.\n\n그래도 닫을까요?')) return; ppBox.hidden = true; ppId = ''; ppDirty = false; });
+window.addEventListener('beforeunload', e => { if (ppDirty) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- 공고 점검 (서버의 규칙 기반 점검 결과를 보여줌 / AI를 쓰지 않아 비용이 들지 않아요) ----------
 const postCheckList = document.getElementById('postCheckList');
@@ -2727,7 +2797,7 @@ function renderPostCheck(r) {
   postCheckSummary.className = 'post-check-summary ' + (c.error ? 'error' : c.warn ? 'warn' : 'ok');
   postCheckList.innerHTML = groups.map((g, gi) => {
     const shown = g.items.slice(0, 3).map(x => `"${escapeHtml(x.match)}"`).join(', ') + (g.items.length > 3 ? ` 외 ${g.items.length - 3}곳` : '');
-    return `<li class="${g.level}"><span class="pc-level">${PC_LABEL[g.level]}</span><strong>${escapeHtml(g.title)}</strong>${g.items.length ? ` — ${shown}` : ''}${g.items.length ? ` <button type="button" class="link-btn pc-go" data-g="${gi}">위치로 이동</button>` : ''}<span class="pc-tip">${escapeHtml(g.tip)}</span></li>`;
+    return `<li class="${g.level}"><span class="pc-level">${PC_LABEL[g.level]}</span><strong>${escapeHtml(g.title)}</strong>${g.items.length ? ` — ${shown}` : ''}${g.items.length ? ` <button type="button" class="link-btn pc-go" data-g="${gi}">위치로 이동</button>` : ''}<span class="pc-tip">${escapeHtml(g.tip)}</span>${g.suggest ? `<span class="pc-suggest"><button type="button" class="add-btn pc-add" data-g="${gi}">추천 문구 공고문에 추가</button> <button type="button" class="link-btn pc-copy" data-g="${gi}">복사</button></span>` : ''}</li>`;
   }).join('') + (r.total > r.findings.length ? `<li class="info">그 밖에 ${r.total - r.findings.length}건이 더 있어요.</li>` : '');
 }
 async function runPostCheck() {
@@ -2750,6 +2820,24 @@ let postCheckTimer = null;
 postJd.addEventListener('input', () => { clearTimeout(postCheckTimer); postCheckTimer = setTimeout(runPostCheck, 700); });
 postApplyEnd.addEventListener('change', runPostCheck);
 document.getElementById('postCheckBtn').addEventListener('click', runPostCheck);
+// 추천 문구가 있는 점검 항목(예: 채용서류 반환·보관·파기 안내)의 "공고문에 추가"·"복사"
+postCheckList.addEventListener('click', async e => {
+  const add = e.target.closest('.pc-add'), cp = e.target.closest('.pc-copy');
+  if (!add && !cp) return;
+  const g = postCheckLast && postCheckLast._groups && postCheckLast._groups[Number((add || cp).dataset.g)];
+  if (!g || !g.suggest) return;
+  if (add) {
+    const head = g.suggest.split('\n')[0];   // 예: [채용서류 반환·보관 안내]
+    if (postJd.value.includes(head)) { setPostStatus('이미 같은 안내가 공고문에 있어요. [입력] 칸을 채워주세요.', 'err'); postJd.focus(); return; }
+    postJd.value = postJd.value.replace(/\s+$/, '') + '\n\n' + g.suggest;
+    postDirty = true; updatePostTodo(); runPostCheck();
+    postJd.focus(); postJd.setSelectionRange(postJd.value.length, postJd.value.length); postJd.scrollTop = postJd.scrollHeight;
+    setPostStatus('추천 문구를 공고문 끝에 넣었어요. [입력] 칸(반환 청구 기간·연락처·보관 기간)을 회사 기준으로 채워주세요. 법률 자문은 아니니 노무사 확인을 권해요.', 'ok');
+    return;
+  }
+  try { await navigator.clipboard.writeText(g.suggest); setPostStatus('추천 문구를 복사했어요.', 'ok'); }
+  catch { setPostStatus('자동 복사가 막혀 있어요. "공고문에 추가"를 쓰거나 브라우저 설정에서 복사를 허용해주세요.', 'err'); }
+});
 postCheckList.addEventListener('click', e => {
   const b = e.target.closest('.pc-go'); if (!b || !postCheckLast || !postCheckLast._groups) return;
   const g = postCheckLast._groups[Number(b.dataset.g)]; const f = g && g.items[0]; if (!f) return;
@@ -2821,10 +2909,12 @@ postingBody.addEventListener('click', async e => {
   try {
     if (btn.dataset.act === 'view') {
       const p = await fetchPosting(id);
-      postingDetailTitle.textContent = `${fmtDate(p.createdAt)} 생성 · ${p.team} · ${p.position} · ${p.status === 'confirmed' ? '확정' : '작성 중'} · ${conditionText(p)}`;
+      postingDetailTitle.textContent = `${fmtDate(p.createdAt)} 생성 · ${p.team} · ${p.position} · ${STATE_LABEL[p.state] || (p.status === 'confirmed' ? '확정' : '작성 중')} · ${conditionText(p)}`;
       postingDetailJd.textContent = p.jd || '(공고문이 비어 있어요)';
       postingDetail.hidden = false;
       postingDetail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else if (btn.dataset.act === 'publish') {
+      openPublishEditor(id);
     } else if (btn.dataset.act === 'use') {
       showTab('resume');                       // 평가는 이력서 검토 탭에서 해요
       evalPositionSelect.value = id;
@@ -2936,7 +3026,7 @@ function renderScreening(r) {
   document.getElementById('resumeInterviewChecks').innerHTML = (r.interviewChecks || []).map(q => `<li><strong>${escapeHtml(q.label)}</strong> — ${q.value ? escapeHtml(q.value) + ' <span class="manage-hint">(' + escapeHtml(q.note) + ')</span>' : escapeHtml(q.note)}</li>`).join('');
   const reqs = r.requirements || [];
   document.getElementById('requirementsBox').hidden = !reqs.length;
-  document.getElementById('resumeRequirements').innerHTML = reqs.map(q => `<li><span class="req-tag ${REQ_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.evidence ? ' — ' + escapeHtml(q.evidence) : ''}</li>`).join('');
+  document.getElementById('resumeRequirements').innerHTML = reqs.map(q => `<li><span class="req-tag ${q.kind === '우대' && q.status === '미충족' ? 'req-unk' : (REQ_CLASS[q.status] || 'req-unk')}">${escapeHtml(q.status)}</span>${q.kind ? `<span class="req-kind kind-${q.kind === '우대' ? 'pref' : 'must'}" title="${escapeHtml(q.id || '')}">${escapeHtml(q.kind)}${q.id ? ' ' + escapeHtml(q.id) : ''}</span>` : ''}<strong>${escapeHtml(q.item)}</strong>${q.evidence ? ' — ' + escapeHtml(q.evidence) : ''}</li>`).join('');
   const ck = r.checklist || [];
   document.getElementById('checklistBox').hidden = !ck.length;
   document.getElementById('resumeChecklist').innerHTML = ck.map(q => `<li><span class="req-tag ${CHECK_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.note ? ' — ' + escapeHtml(q.note) : ''}</li>`).join('');
@@ -4029,7 +4119,7 @@ function apRowHtml(x) {
     <td data-label="1차 면접">${escapeHtml(apFmtWhen(x.interview1))}${apSchedBadge(x, '1차')}</td>
     <td data-label="2차 면접">${escapeHtml(apFmtWhen(x.interview2))}${apSchedBadge(x, '2차')}</td>
     <td data-label="점수 · 추천">${x.score === null || x.score === undefined ? '-' : escapeHtml(String(x.score))}${rec ? ` <span class="ap-rec ${rec[1]}">${rec[0]}</span>` : ''}</td>
-    <td data-label="">${canEdit ? '<button type="button" class="link-btn ap-edit-btn">수정</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('send') ? '<button type="button" class="add-btn ap-sms-btn">📨 면접 문자</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('schedule') ? '<button type="button" class="link-btn ap-sch-btn">📅 일정</button> ' : ''}<a class="link-btn" href="${escapeHtml(x.url || '#')}" target="_blank" rel="noopener">노션</a></td>
+    <td data-label="">${canEdit ? '<button type="button" class="link-btn ap-edit-btn">수정</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('send') ? '<button type="button" class="add-btn ap-sms-btn">📨 면접 문자</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('schedule') ? '<button type="button" class="link-btn ap-sch-btn">📅 일정</button> ' : ''}<button type="button" class="add-btn ap-iq-btn" title="맞춤 면접 질문을 만들고 답변·점수를 적어 노션에 전송해요">면접 질문·답변</button> <a class="link-btn" href="${escapeHtml(x.url || '#')}" target="_blank" rel="noopener">노션</a></td>
   </tr>`;
 }
 function apRender() {
@@ -4162,6 +4252,11 @@ apBody.addEventListener('click', async e => {
     return;
   }
   if (e.target.closest('.ap-cancel')) { tr.remove(); return; }
+  if (e.target.closest('.ap-iq-btn')) {
+    const x = apList.find(v => v.id === id); if (!x) return;
+    if (interviewDirty() && !confirm('보내지 않은 답변이 있어요. 다른 지원자를 고르면 작성한 답변이 사라져요.\n\n그래도 바꿀까요?')) return;
+    openInterviewFor(x); return;
+  }
   if (e.target.closest('.ap-sms-btn') || e.target.closest('.ap-sch-btn')) {
     const x = apList.find(v => v.id === id);
     if (!x) return;
@@ -4219,7 +4314,7 @@ apBody.addEventListener('click', async e => {
     if (dir === 'toSchedule') {
       if (r.notionAt.length < 16) { setApMsg('노션에 시간이 없어서(날짜만 있어요) 일정의 시간을 바꿀 수 없어요. 노션에 시간을 먼저 입력하세요.', 'err'); return; }   // 바꿀 수 없으면 확인창을 띄우기 전에 알림
       if (!confirm(`${who} 님의 ${round} 면접 일정을 노션에 맞춰 바꿀까요?\n일정(문자 보내기) ${apFmtWhen(r.scheduleAt)} → ${apFmtWhen(r.notionAt)}\n일정의 변경 이력에 기록돼요.${warn}`)) return;
-      const res = await fetch(`/api/schedules/${encodeURIComponent(r.scheduleId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interviewAt: r.notionAt, reason: '지원자 관리에서 노션 일시에 맞춤' }) });
+      const res = await fetch(`/api/schedules/${encodeURIComponent(r.scheduleId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interviewAt: r.notionAt, reason: '면접 관리에서 노션 일시에 맞춤' }) });
       const d = await readJsonOrNull(res);
       if (!res.ok) throw new Error((d && d.error) || '일정을 바꾸지 못했어요.');
       await apRefreshSchedule(id); apRender(); apFlashRow(id);
@@ -4243,7 +4338,7 @@ let apSearchTimer = null;
 apSearch.addEventListener('input', () => { clearTimeout(apSearchTimer); apSearchTimer = setTimeout(() => loadApplicants(true), 400); });
 apMore.addEventListener('click', () => loadApplicants(false));
 // 노션 화면에서 고치고 돌아왔을 때 바로 최신으로 보이게 (탭이 열려 있고 30초 넘게 지났으면 다시 읽음)
-window.addEventListener('focus', () => { if (!applicantsView.hidden && Date.now() - apLoadedAt > 30000) loadApplicants(true); });
+window.addEventListener('focus', () => { if (!interviewView.hidden && Date.now() - apLoadedAt > 30000) loadApplicants(true); });
 
 
 // ---------- 여러 이력서 한꺼번에 점수 보기 (점수만 보여주고, 노션 등록은 줄마다 직접 누르는 버튼으로만) ----------
@@ -4286,7 +4381,7 @@ document.getElementById('batchClearBtn').addEventListener('click', () => {
 document.getElementById('batchSort').addEventListener('change', batchRender);
 
 function batchCounts(r) {
-  const reqs = (r.requirements || []);
+  const reqs = (r.requirements || []).filter(q => q.kind !== '우대');   // "필수 요건 충족 수"라서 우대(P)는 빼요. kind가 없는 옛 결과는 전부 필수로 봐요
   const ok = reqs.filter(q => q.status === '충족').length;
   const low = Object.values(r.confidence || {}).filter(v => v === '낮음').length;
   return { reqText: reqs.length ? `${ok}/${reqs.length}` : '-', low };
@@ -4317,10 +4412,11 @@ function batchRender() {
     else if (row.state === 'err') cells = `<td colspan="4" class="batch-err">${escapeHtml(row.error)}</td>`;
     else cells = '<td colspan="4" class="batch-state">대기 중 (아직 점수를 안 봤어요)</td>';
     const reg = row.reg && row.reg.id ? `<span class="batch-badge">서류 합격 확정됨</span>` : '';
+    const pick = row.state === 'ok' && !(row.reg && row.reg.id) ? `<label class="check-chip batch-pick-chip"><input type="checkbox" class="batch-pick"${row.picked ? ' checked' : ''}${row.recording ? ' disabled' : ''} /> 선정</label> ` : '';
     const btns = row.state === 'ok'
-      ? `<button type="button" class="link-btn batch-detail-btn">${row.open ? '접기' : '점수표'}</button> ` + (row.reg && row.reg.id ? ((canEdit('send') ? '<button type="button" class="add-btn batch-sms-btn">📨 면접 문자</button> ' : '') + (canEdit('schedule') ? '<button type="button" class="link-btn batch-sch-btn">📅 일정 등록</button> ' : '') + (row.reg.url ? `<a class="link-btn" href="${escapeHtml(row.reg.url)}" target="_blank" rel="noopener noreferrer">노션에서 열기</a>` : '')) : '<button type="button" class="add-btn batch-reg-btn">서류 합격 확정</button>')
+      ? pick + `<button type="button" class="link-btn batch-detail-btn">${row.open ? '접기' : '점수표'}</button> ` + (row.reg && row.reg.id ? ((canEdit('send') ? '<button type="button" class="add-btn batch-sms-btn">📨 면접 문자</button> ' : '') + (canEdit('schedule') ? '<button type="button" class="link-btn batch-sch-btn">📅 일정 등록</button> ' : '') + (row.reg.url ? `<a class="link-btn" href="${escapeHtml(row.reg.url)}" target="_blank" rel="noopener noreferrer">노션에서 열기</a>` : '')) : '<button type="button" class="add-btn batch-reg-btn">서류 합격 확정</button>')
       : (row.state === 'err' ? '<button type="button" class="link-btn batch-retry-btn">다시 평가</button>' : '') + (row.state === 'wait' || row.state === 'err' ? ' <button type="button" class="link-btn batch-remove-btn">빼기</button>' : '');
-    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일"><strong>${escapeHtml(name)}</strong>${reg}<span class="ap-sub">${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}</span></td>${cells}<td data-label="">${btns}</td></tr>`;
+    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일"><strong>${escapeHtml(name)}</strong>${reg}<span class="ap-sub">${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
     return main + (row.open && row.state === 'ok' ? batchDetailHtml(row) : '');
   }).join('');
   batchBody.querySelectorAll('tr.batch-detail').forEach(async d => {
@@ -4333,6 +4429,7 @@ function batchRender() {
     if (s.msg) { d.querySelector('.br-msg').textContent = s.msg; d.querySelector('.br-msg').className = s.cls; }
     if (s.disabled) d.querySelector('.br-submit').disabled = true;
   });
+  if (typeof batchPickRefresh === 'function') batchPickRefresh();
 }
 function batchDetailHtml(row) {
   const r = row.result;
@@ -4355,7 +4452,7 @@ function batchDetailHtml(row) {
         <div><label>면접상태</label><select class="br-status"></select></div>
       </div>
       <div class="ap-edit-actions"><button type="button" class="add-btn br-submit">서류 합격 확정하기</button><span class="status br-msg"></span></div>
-      <p class="manage-hint">이름·점수·요약·학력·경력이 노션 카드에 들어가고 이력서 PDF도 붙여요. 확정한 뒤에는 "📨 면접 문자"로 면접 문자를 보내고, 면접 확정과 일정 변경은 "지원자 관리"에서 해요.</p>
+      <p class="manage-hint">이름·점수·요약·학력·경력이 노션 카드에 들어가고 이력서 PDF도 붙여요. 확정한 뒤에는 "📨 면접 문자"로 면접 문자를 보내고, 면접 확정과 일정 변경은 "면접 관리"에서 해요.</p>
     </div>
   </td></tr>`;
 }
@@ -4405,6 +4502,82 @@ async function batchPrepareRegister(tr, row) {
   const ch = tr.querySelector('.br-channel'); ch.innerHTML = optionsHtml(o.channels || [], '(선택 안 함)'); ch.value = (o.channels || []).includes('이메일') ? '이메일' : '';
   const stt = tr.querySelector('.br-status'); stt.innerHTML = optionsHtml(o.statuses || []); stt.value = (o.statuses || []).includes('서류합격') ? '서류합격' : (o.statuses || [''])[0];
 }
+// ---------- 서류 합격 선정 → 한 번에 기록 ----------
+// 점수를 보고 "선정"에 체크한 사람만 모아 노션에 서류 합격으로 기록해요. 이름·연락처는 이력서에서 읽은 값을 쓰고,
+// 같은 사람이 노션에 있으면 건너뛰어요(강제 등록은 줄별 "서류 합격 확정"에서만 할 수 있어요). 한 명이 실패해도 나머지는 계속해요.
+const batchPickBar = document.getElementById('batchPickBar'), batchPickInfo = document.getElementById('batchPickInfo'), batchRecordBtn = document.getElementById('batchRecordBtn');
+let batchRecording = false;
+function batchPickedRows() { return batchRows.filter(r => r.picked && r.state === 'ok' && !(r.reg && r.reg.id)); }
+function batchPickRefresh() {
+  const okRows = batchRows.filter(r => r.state === 'ok' && !(r.reg && r.reg.id));
+  batchPickBar.hidden = !batchRows.some(r => r.state === 'ok');
+  const picked = batchPickedRows();
+  batchPickInfo.textContent = picked.length ? `${picked.length}명 선정: ${picked.map(r => `${(r.result.candidate && r.result.candidate.name) || '(이름 미확인)'} ${r.result.total}점`).join(', ')}` : (okRows.length ? '아직 선정한 사람이 없어요.' : '선정할 수 있는 줄이 없어요(이미 확정했거나 점수가 없어요).');
+  batchRecordBtn.disabled = batchRecording || !picked.length;
+  batchRecordBtn.textContent = picked.length ? `선정한 ${picked.length}명 노션에 기록하기` : '선정한 사람 노션에 기록하기';
+}
+batchBody.addEventListener('change', e => {
+  const cb = e.target.closest('.batch-pick'); if (!cb) return;
+  const tr = cb.closest('tr.batch-row'); const row = tr && batchRows.find(r => r.id === Number(tr.dataset.id)); if (!row) return;
+  row.picked = cb.checked; batchPickRefresh();
+});
+document.getElementById('batchPickClearBtn').addEventListener('click', () => { if (batchRecording) return; batchRows.forEach(r => { r.picked = false; }); batchRender(); });
+async function batchRecordOne(row) {
+  const r = row.result, cand = r.candidate || {};
+  const name = String(cand.name || '').trim();
+  if (!name) return { ok: false, skip: true, msg: '이력서에서 이름을 읽지 못해 기록하지 않았어요. 줄의 "서류 합격 확정"에서 이름을 직접 입력해주세요.' };
+  const st = notionStatus; const opts = (st && st.options) || {};
+  if (!st || !st.configured) return { ok: false, msg: (st && st.message) || '노션 연결을 확인하지 못했어요.' };
+  if (!(opts.statuses || []).includes('서류합격')) return { ok: false, msg: '노션 면접상태에 "서류합격" 선택지가 없어서 기록하지 않았어요.' };
+  const posTeam = r.position.name.includes(' - ') ? r.position.name.split(' - ')[0].trim() : '';
+  const teams = opts.teams || [];
+  const team = teams.includes(posTeam) ? posTeam : (teamAliases[posTeam] && teams.includes(teamAliases[posTeam]) ? teamAliases[posTeam] : '');
+  const channel = (opts.channels || []).includes('이메일') ? '이메일' : '';
+  const phone = String(cand.phone || '').trim();
+  const job = jobFromPosition(r.position.name, r.position.brand);
+  const res = await fetch('/api/notion/register-applicant', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name, phone, team, job, channels: channel ? [channel] : [], appliedAt: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }),
+      status: '서류합격', recommendation: NOTION_REC_MAP[r.recommendation] || '', total: r.total, summary: batchSummary(r), education: cand.education || '', career: cand.career || '', force: false,
+      checklist: (r.checklist || []).map(x => ({ code: x.code, status: x.status, note: x.note })),
+    }),
+  });
+  const data = await readJsonOrNull(res);
+  if (!data) return { ok: false, msg: '서버가 응답하지 못했어요.' };
+  if (res.status === 409 && data.duplicate) {
+    const who = (data.matches || []).map(m => `${m.name}${m.status ? '(' + m.status + ')' : ''}`).join(', ');
+    return { ok: false, skip: true, msg: `노션에 같은 사람이 있어서 건너뛰었어요${who ? ': ' + who : ''}. 새로 등록하려면 줄의 "서류 합격 확정"을 쓰세요.` };
+  }
+  if (!res.ok) return { ok: false, msg: data.error || '등록하지 못했어요.' };
+  row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone, team, job, status: '서류합격', interview1: '', interview2: '', smsStatus: '' };
+  let pdfMsg = '';
+  try {   // 이력서 PDF도 붙여요(실패해도 카드는 이미 만들어졌어요)
+    const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file });
+    const ad = await readJsonOrNull(ar); if (!ar.ok) throw new Error((ad && ad.error) || '첨부 실패');
+  } catch (err) { pdfMsg = ` (이력서 PDF는 붙이지 못했어요: ${err.message || ''})`; }
+  return { ok: true, msg: `노션에 서류 합격으로 기록했어요${pdfMsg}.`, pdfFail: !!pdfMsg };
+}
+batchRecordBtn.addEventListener('click', async () => {
+  if (batchRecording) return;
+  const picked = batchPickedRows(); if (!picked.length) return;
+  const lines = picked.map(r => `- ${(r.result.candidate && r.result.candidate.name) || '(이름 미확인)'} · ${r.result.total}점 · ${r.result.recommendation}`).join('\n');
+  if (!confirm(`아래 ${picked.length}명을 노션에 "서류합격"으로 기록할까요?\n${lines}\n\n노션에 같은 사람이 있으면 건너뛰어요. 합격·탈락은 사람이 정한 결정이에요.`)) return;
+  batchRecording = true; batchRows.forEach(r => { if (r.picked) { r.recording = true; r.recMsg = '기록 중...'; r.recErr = false; } }); batchRender(); batchPickRefresh();
+  setBatchStatus(`선정한 ${picked.length}명을 노션에 기록하는 중...`, '');
+  let done = 0, skipped = 0, failed = 0;
+  try { await ensureNotionStatus(true); } catch { /* 아래에서 안내해요 */ }
+  for (const row of picked) {   // 노션 요청이 몰리지 않게 한 명씩 차례로
+    let out;
+    try { out = await batchRecordOne(row); } catch (err) { out = { ok: false, msg: (err && err.message) || '기록 중 오류가 발생했어요.' }; }
+    row.recording = false; row.recMsg = out.msg; row.recErr = !out.ok && !out.skip;
+    if (out.ok) { done++; row.picked = false; } else if (out.skip) { skipped++; } else { failed++; }
+    batchRender(); batchPickRefresh();
+  }
+  batchRecording = false; batchRender(); batchPickRefresh();
+  setBatchStatus(`기록 결과: ${done}명 기록${skipped ? `, ${skipped}명 건너뜀(중복이거나 이름 없음)` : ''}${failed ? `, ${failed}명 실패` : ''}. 각 줄 아래에 사유를 적었어요.${done ? ' 기록한 줄에서 "📨 면접 문자"로 이어갈 수 있어요.' : ''}`, failed ? 'err' : 'ok');
+});
+
 async function batchRegister(row, tr, force) {
   const r = row.result; const cand = r.candidate || {};
   const name = tr.querySelector('.br-name').value.trim();
