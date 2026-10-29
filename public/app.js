@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-19';
+const APP_VERSION = '2026.10.21-20';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -3174,12 +3174,14 @@ function confTag(c) {
   return ` <span class="conf-tag ${cls}">확신 ${escapeHtml(c)}${c === '낮음' ? ' · 확인 필요' : ''}</span>`;
 }
 const usePeersEl = document.getElementById('usePeers');
+// 영역별 평가 근거 글: 비어 있을 때 AI가 직접 평가한 결과는 "-", 가져온 결과(파일)는 "가져온 결과에는 근거가 없어요"(이력서에 근거가 없다는 뜻이 아니에요)
+const commentText = (r, key) => { const c = (r.comments || {})[key]; if (c) return escapeHtml(c); return r.source === 'import' ? '<span class="manage-hint" style="margin:0">가져온 결과에는 근거가 없어요</span>' : '-'; };
 // 전공 관련성 + 이전 서류 합격자와의 비교 (결과 화면·일괄 점수 상세에서 같이 씀)
 function peerLinesHtml(r) {
   const out = [];
   const mf = r.majorFit || {};
   if (mf.relation && mf.relation !== '확인불가') out.push(`<li><strong>전공 관련성</strong> — ${escapeHtml(mf.relation)}${mf.note ? ' · ' + escapeHtml(mf.note) : ''}</li>`);
-  else out.push('<li><strong>전공 관련성</strong> — 이력서에서 확인되지 않았어요.</li>');
+  else out.push(mf.imported ? '<li><strong>전공 관련성</strong> — 가져온 결과에는 이 정보가 없어요. 이력서에서 직접 확인하세요.</li>' : '<li><strong>전공 관련성</strong> — 이력서에서 확인되지 않았어요.</li>');
   const pi = r.peerInfo || { status: 'off' };
   const pn = r.peerNotes || {};
   if (pi.status === 'used') {
@@ -3207,7 +3209,7 @@ function renderScreening(r) {
         <input type="number" class="score-input" min="0" max="${item.max}" step="1"
                value="${r.scores[item.key]}" data-ai="${r.scores[item.key]}" aria-label="${escapeHtml(item.area)} 점수" />
       </td>
-      <td data-label="AI 평가 근거">${escapeHtml(r.comments[item.key] || '-')}${confTag((r.confidence || {})[item.key])}</td>
+      <td data-label="AI 평가 근거">${commentText(r, item.key)}${confTag((r.confidence || {})[item.key])}</td>
     </tr>`).join('');
   scoreBody.querySelectorAll('.score-input').forEach(inp => {
     inp.addEventListener('input', recomputeTotal);
@@ -4633,7 +4635,7 @@ function batchRender() {
 }
 function batchDetailHtml(row) {
   const r = row.result;
-  const scoreRows = r.rubric.map(item => `<tr><td><strong>${escapeHtml(item.area)}</strong></td><td>${item.max}점</td><td>${r.scores[item.key]}</td><td>${escapeHtml(r.comments[item.key] || '-')}${confTag((r.confidence || {})[item.key])}</td></tr>`).join('');
+  const scoreRows = r.rubric.map(item => `<tr><td><strong>${escapeHtml(item.area)}</strong></td><td>${item.max}점</td><td>${r.scores[item.key]}</td><td>${commentText(r, item.key)}${confTag((r.confidence || {})[item.key])}</td></tr>`).join('');
   const reqs = (r.requirements || []).map(q => `<li><span class="req-tag ${REQ_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.evidence ? ' — ' + escapeHtml(q.evidence) : ''}</li>`).join('');
   const checks = (r.interviewChecks || []).map(q => `<li><strong>${escapeHtml(q.label)}</strong> — ${q.value ? escapeHtml(q.value) : escapeHtml(q.note)}</li>`).join('');
   return `<tr class="batch-detail" data-id="${row.id}"><td colspan="7">
