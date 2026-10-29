@@ -309,7 +309,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-19';
+const APP_VERSION = '2026.10.21-20';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -1986,6 +1986,8 @@ app.post('/api/resume/import-results', ah(async (req, res) => {
     const result = buildScreeningResult(parsed, ctx.position);
     if (!reqOk) result.requirements = [];
     result.source = 'import';
+    result.interviewChecks = buildImportedInterviewChecks(it.interviewInfo);   // 값이 없을 때 "이력서에 없어요"라고 단정하지 않아요
+    result.majorFit = { ...result.majorFit, imported: true };               // 전공 관련성도 같은 이유로 화면 문구를 달리 써요
     results.push({ name: nm, ok: true, result });
   }
   res.json({ success: true, imported: results.filter(x => x.ok).length, failed: results.filter(x => !x.ok).length, position: { id: ctx.position.id, name: ctx.position.name, profile: ctx.position.profile }, results });
@@ -3204,6 +3206,17 @@ function cleanPeerNotes(n) {
   return { similarity: PEER_SIM.includes(sim) ? sim : '참고 불가', similar: clipText(n?.similar, 300), different: clipText(n?.different, 300), scoreNote: clipText(n?.scoreNote, 200) };
 }
 // 점수에 쓰지 않는 참고 정보: 면접에서 직접 확인할 것 (통근·거주지는 읽지 않고 항상 면접에서 확인하게 안내)
+// 가져온 채점 결과(파일)는 앱이 이력서를 읽은 게 아니라서, 값이 비어 있어도 "이력서에 없어요"라고 말하면 거짓이에요. 그래서 문구를 따로 써요.
+function buildImportedInterviewChecks(info) {
+  const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const avail = clean(info?.availability), salary = clean(info?.desiredSalary);
+  const none = '가져온 결과에는 이 정보가 없어요. 이력서에서 직접 확인하세요.';
+  return [
+    { key: 'availability', label: '재직 여부·입사 가능 시기', value: avail, note: avail ? '가져온 결과에 적힌 내용이에요. 이력서와 면접에서 한 번 더 확인하세요.' : none },
+    { key: 'salary', label: '희망 연봉', value: salary, note: salary ? '가져온 결과에 적힌 희망 연봉이에요. 급여는 면접 후 협상이에요.' : none + ' (급여는 면접 후 협상)' },
+    { key: 'commute', label: '통근·거주지', value: '', note: '주소는 읽지 않아요. 통근 가능 여부와 거주지 이전 계획은 면접에서 직접 확인하세요.' },
+  ];
+}
 function buildInterviewChecks(info) {
   const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const avail = clean(info?.availability);
