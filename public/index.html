@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-20">
+<html lang="ko" data-app-version="2026.10.21-21">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -523,6 +523,7 @@
           <button id="batchClearBtn" class="link-btn" type="button">목록 비우기</button>
           <select id="batchSort" aria-label="정렬"><option value="score">총점 높은 순</option><option value="file">올린 순서</option></select>
         </div>
+        <div id="batchPostingChips" class="batch-posting-chips" role="group" aria-label="공고별 보기" hidden></div>
         <div class="import-box" data-edit="resume">
           <label class="link-btn import-label">📂 채점 결과 파일 가져오기 (.json)<input id="resultImportFile" type="file" accept="application/json,.json" hidden /></label>
           <span class="manage-hint" style="margin:0">먼저 위에서 <strong>평가할 공고</strong>를 고르세요. 파일 안의 점수를 그 공고의 평가표에 넣어 점수 표에 보여줘요(총점·추천은 앱이 다시 계산해요). 이력서 PDF는 저장하지 않아서 가져온 결과에는 PDF가 없고, 노션에 기록할 때도 PDF는 붙지 않아요. <strong>연락처 등 개인정보가 든 파일이니 가져온 뒤에는 파일을 지워주세요.</strong></span>

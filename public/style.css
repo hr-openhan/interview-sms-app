@@ -2028,3 +2028,8 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 /* 확정하지 않은 공고 안내 */
 .eval-draft-note { margin: 6px 0 2px; padding: 8px 10px; border: 1px solid #ecd9a8; border-radius: 8px; background: #fff8e6; color: #6b5a2a; font-size: 13px; }
 .eval-draft-note .link-btn { margin-left: 4px; }
+
+/* 공고별로 지원자 따로 보기 */
+.batch-posting-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.batch-chip { padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.batch-chip.on { background: var(--accent, #a8552c); color: #fff; border-color: var(--accent, #a8552c); }

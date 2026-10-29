@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-20';
+const APP_VERSION = '2026.10.21-21';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -4562,18 +4562,30 @@ function batchInfoRefresh() {
   batchFileInfo.textContent = batchRows.length ? `올린 이력서 ${batchRows.length}개 (아직 점수 안 본 것 ${waiting}개)` : '';
   batchTable.hidden = !batchRows.length;
 }
+// 같은 이름의 파일을 또 올리면 "마지막 파일"로 바꿔요(같은 사람이 두 줄로 쌓이지 않게). 이름은 대소문자·앞뒤 공백만 무시하고 그대로 비교해요.
+const batchFileKey = name => String(name || '').trim().toLowerCase();
+// 같은 이름의 줄이 있으면 그 줄을 찾아 돌려줘요. 점수를 보는 중이거나 이미 노션에 기록한 줄은 바꾸지 않아요(진행 중 요청·기록 표시가 어긋나지 않게).
+function batchFindSameFile(name) { const k = batchFileKey(name); return batchRows.find(r => r.file && batchFileKey(r.file.name) === k); }
 batchFilesEl.addEventListener('change', () => {
-  const skipped = [];
+  const skipped = []; let replaced = 0;
   for (const f of [...batchFilesEl.files]) {
-    if (batchRows.length >= BATCH_MAX_FILES) { skipped.push(`${f.name} (최대 ${BATCH_MAX_FILES}개까지예요)`); continue; }
     if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { skipped.push(`${f.name} (PDF가 아니에요)`); continue; }
     if (f.size === 0) { skipped.push(`${f.name} (빈 파일이에요)`); continue; }
     if (f.size > PDF_MAX_BYTES) { skipped.push(`${f.name} (${batchSizeText(f.size)}: 4MB 이하로 줄여주세요)`); continue; }
+    const same = batchFindSameFile(f.name);
+    if (same) {
+      if (same.state === 'run') { skipped.push(`${f.name} (같은 이름의 파일이 점수를 보는 중이에요. 끝난 뒤 다시 올려주세요)`); continue; }
+      if (same.reg && same.reg.id) { skipped.push(`${f.name} (같은 이름의 파일이 이미 노션에 서류 합격으로 기록됐어요. 바꾸지 않았어요)`); continue; }
+      batchRows = batchRows.filter(r => r !== same); replaced++;   // 마지막으로 올린 파일로 교체(맨 뒤에 새로 추가돼요)
+    } else if (batchRows.length >= BATCH_MAX_FILES) { skipped.push(`${f.name} (최대 ${BATCH_MAX_FILES}개까지예요)`); continue; }
     batchRows.push({ id: ++batchSeq, file: f, state: 'wait', result: null, error: '', positionId: '', open: false, reg: null });
   }
   batchFilesEl.value = '';
   batchRender(); batchInfoRefresh();
-  setBatchStatus(skipped.length ? `올리지 않은 파일: ${skipped.join(' / ')}` : '', skipped.length ? 'err' : '');
+  const msgs = [];
+  if (replaced) msgs.push(`같은 이름의 파일 ${replaced}개를 마지막으로 올린 파일로 바꿨어요(이전 점수는 지워졌어요, 다시 "점수 보기"를 눌러주세요)`);
+  if (skipped.length) msgs.push(`올리지 않은 파일: ${skipped.join(' / ')}`);
+  setBatchStatus(msgs.join(' · '), skipped.length ? 'err' : (replaced ? 'ok' : ''));
 });
 document.getElementById('batchClearBtn').addEventListener('click', () => {
   if (batchRunning) { setBatchStatus('점수를 보는 중에는 비울 수 없어요.', 'err'); return; }
@@ -4588,8 +4600,35 @@ function batchCounts(r) {
   const low = Object.values(r.confidence || {}).filter(v => v === '낮음').length;
   return { reqText: reqs.length ? `${ok}/${reqs.length}` : '-', low };
 }
+// ---- 공고별로 지원자 따로 보기 ----
+// 줄의 공고는 "점수 보기"를 누른 순간 고른 공고(row.positionId)예요. 아직 점수를 안 본 줄은 공고가 없어요('').
+let batchPostingFilter = '';   // '' = 전체, '__none' = 아직 평가 전, 그 밖에는 공고 id
+function batchPostingName(id) {
+  const p = postingsAll.find(x => x.id === id);
+  if (p) return p.position + (p.brand ? ` [${p.brand}]` : '');
+  const r = batchRows.find(x => x.positionId === id && x.result && x.result.position);
+  return r ? r.result.position.name : '(없어진 공고)';
+}
+function batchPostingGroups() {
+  const map = new Map(); let none = 0;
+  batchRows.forEach(r => { if (r.positionId) map.set(r.positionId, (map.get(r.positionId) || 0) + 1); else none++; });
+  return { groups: [...map.entries()].map(([id, n]) => ({ id, n, name: batchPostingName(id) })), none };
+}
+function batchRenderChips() {
+  const box = document.getElementById('batchPostingChips'); if (!box) return;
+  const { groups, none } = batchPostingGroups();
+  if (batchPostingFilter && batchPostingFilter !== '__none' && !groups.some(g => g.id === batchPostingFilter)) batchPostingFilter = '';
+  if (batchPostingFilter === '__none' && !none) batchPostingFilter = '';
+  // 공고가 하나뿐이고 평가 전 줄이 없으면 나눠 볼 필요가 없어서 숨겨요
+  if (groups.length + (none ? 1 : 0) < 2) { box.hidden = true; box.innerHTML = ''; return; }
+  const chip = (key, label, n) => `<button type="button" class="batch-chip ${batchPostingFilter === key ? 'on' : ''}" data-key="${escapeHtml(key)}">${escapeHtml(label)} <strong>${n}</strong></button>`;
+  box.hidden = false;
+  box.innerHTML = '<span class="manage-hint" style="margin:0 6px 0 0">공고별 보기</span>' + chip('', '전체', batchRows.length) + groups.map(g => chip(g.id, g.name, g.n)).join('') + (none ? chip('__none', '아직 평가 전', none) : '');
+}
+document.getElementById('batchPostingChips').addEventListener('click', e => { const b = e.target.closest('.batch-chip'); if (!b) return; batchPostingFilter = b.dataset.key; batchRender(); });
 function batchSorted() {
-  const rows = batchRows.slice();
+  batchRenderChips();
+  const rows = batchRows.filter(r => !batchPostingFilter || (batchPostingFilter === '__none' ? !r.positionId : r.positionId === batchPostingFilter));
   if (document.getElementById('batchSort').value === 'score') {
     rows.sort((x, y) => (y.result ? y.result.total : -1) - (x.result ? x.result.total : -1) || x.id - y.id);
   }
@@ -4607,6 +4646,7 @@ function batchRender() {
     const cand = (r && r.candidate) || {};
     const name = r ? (cand.name || '(이름을 못 읽었어요)') : (row.file ? row.file.name : '(가져온 결과)');
     let cells;
+    if (row.state === 'ok' && !r) { row.state = 'err'; row.error = '평가 결과를 불러오지 못했어요. "다시 평가"를 눌러주세요.'; }   // 한 줄이 어긋나도 표 전체가 깨지지 않게
     if (row.state === 'ok') {
       const c = batchCounts(r);
       cells = `<td data-label="총점"><strong>${r.total}</strong></td><td data-label="검토 우선순위">${escapeHtml(r.recommendation)}</td><td data-label="필수 요건">${escapeHtml(c.reqText)}</td><td data-label="확인 필요">${c.low ? c.low + '개 영역' : '-'}</td>`;
@@ -4755,7 +4795,7 @@ document.getElementById('resultImportFile').addEventListener('change', async e =
   if (!evalPositionSelect.value) { setBatchStatus('평가할 공고를 먼저 선택해주세요. (위 "평가할 공고"에서 고르세요)', 'err'); return; }
   const candidates = Array.isArray(r.data) ? r.data : (r.data && r.data.candidates);
   if (!Array.isArray(candidates)) { setBatchStatus('채점 결과 목록(candidates)이 없어요. 이 앱에서 쓰는 채점 결과 파일인지 확인해주세요.', 'err'); return; }
-  if (batchRows.length + candidates.length > 80) { setBatchStatus('점수 표가 너무 길어져요. "목록 비우기" 후 다시 가져와주세요.', 'err'); return; }
+  if (batchRows.length + candidates.length > 160) { setBatchStatus('점수 표가 너무 길어져요. "목록 비우기" 후 다시 가져와주세요.', 'err'); return; }
   setBatchStatus('채점 결과를 가져오는 중...');
   try {
     const res = await fetch('/api/resume/import-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionId: evalPositionSelect.value, profile: r.data.profile || '', candidates }) });
@@ -4763,9 +4803,19 @@ document.getElementById('resultImportFile').addEventListener('change', async e =
     if (!j) throw new Error('서버가 응답하지 못했어요.');
     if (!res.ok) throw new Error(j.error || '가져오지 못했어요.');
     const failed = [];
-    j.results.forEach(x => { if (x.ok) batchRows.push({ id: ++batchSeq, file: null, state: 'ok', result: x.result, error: '', positionId: evalPositionSelect.value, imported: true, open: false }); else failed.push(`${x.name || '(이름 없음)'}: ${x.error}`); });
+    // 같은 공고에 같은 이름이 이미 있으면 마지막 파일의 결과로 바꿔요(같은 파일을 두 번 가져와도 줄이 두 배가 되지 않게). 이미 노션에 기록한 줄은 바꾸지 않아요.
+    let replaced = 0; const kept = [];
+    j.results.forEach(x => {
+      if (!x.ok) { failed.push(`${x.name || '(이름 없음)'}: ${x.error}`); return; }
+      const nm = String((x.result.candidate && x.result.candidate.name) || '').trim();
+      const same = nm && batchRows.find(r => r.imported && r.positionId === evalPositionSelect.value && String((r.result && r.result.candidate && r.result.candidate.name) || '').trim() === nm);
+      if (same && same.reg && same.reg.id) { kept.push(nm); return; }
+      if (same) { batchRows = batchRows.filter(r => r !== same); replaced++; }
+      batchRows.push({ id: ++batchSeq, file: null, state: 'ok', result: x.result, error: '', positionId: evalPositionSelect.value, imported: true, open: false });
+    });
     batchRender(); batchInfoRefresh(); batchTable.hidden = !batchRows.length;
-    setBatchStatus(`채점 결과 ${j.imported}명을 점수 표에 가져왔어요${j.failed ? `, ${j.failed}명은 가져오지 못했어요 (${failed.slice(0, 3).join(' / ')}${failed.length > 3 ? ' 외' : ''})` : ''}. 합격시킬 사람을 "선정"해서 노션에 기록하세요.`, j.failed ? 'err' : 'ok');
+    const added = j.imported - kept.length;
+    setBatchStatus(`채점 결과 ${added}명을 점수 표에 가져왔어요${replaced ? ` (그중 ${replaced}명은 같은 이름이 있어 마지막 결과로 바꿨어요)` : ''}${kept.length ? `, ${kept.length}명(${kept.slice(0, 3).join(', ')})은 이미 노션에 기록돼 있어 바꾸지 않았어요` : ''}${j.failed ? `, ${j.failed}명은 가져오지 못했어요 (${failed.slice(0, 3).join(' / ')}${failed.length > 3 ? ' 외' : ''})` : ''}. 합격시킬 사람을 "선정"해서 노션에 기록하세요.`, (j.failed || kept.length) ? 'err' : 'ok');
   } catch (err) { setBatchStatus(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
 });
 
