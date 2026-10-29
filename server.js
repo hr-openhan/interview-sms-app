@@ -309,7 +309,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-18';
+const APP_VERSION = '2026.10.21-19';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -1738,27 +1738,29 @@ function yearFrac(aStr, bStr) {
 const CAREER_LIMITS = { maxEmployees: 500, maxCareers: 30, name: 40, empNo: 20, eng: 40, place: 30, note: 300, careerCompany: 60, careerNote: 100, maxMonths: 600 };
 const CAREER_EMP_TYPES = ['정직원', '수습', '계약직', '기타'];
 const DEFAULT_PROMO_RULES = {
-  requireTenure: true,   // true: 누적 경력과 현 직급 최소 근속을 모두 충족해야 승진 검토 대상 (엑셀 사용방법의 설명). false: 누적 경력만 (엑셀 판정 수식)
+  requireTenure: false,   // false(기본): 누적 경력만 비교 — 엑셀의 실제 판정 수식과 같아요. true: 현 직급 최소 근속도 함께 충족해야 승진 검토 대상(엑셀 사용방법 시트의 설명)
   highRate: 70, lowRate: 20,   // 직무 연관성 높음·낮음 경력 인정률(%)
   ranks: [
-    { rank: '사원', nextYears: 4, minTenure: 4, note: '사원 → 대리' },
-    { rank: '대리', nextYears: 7, minTenure: 3, note: '대리 → 과장' },
-    { rank: '과장', nextYears: 11, minTenure: 4, note: '과장 → 차장' },
-    { rank: '차장', nextYears: 15, minTenure: 4, note: '차장 → 부장' },
-    { rank: '부장', nextYears: null, minTenure: null, note: '별도 심사 기준 필요' },
-    { rank: '이사', nextYears: null, minTenure: null, note: '능력에 따른 진급 / 별도 심사' },
-    { rank: '실장', nextYears: null, minTenure: null, note: '별도 심사' },
-    { rank: '대표이사', nextYears: null, minTenure: null, note: '별도 심사' },
+    { rank: '사원', nextRank: '대리', nextYears: 4, minTenure: 4, note: '사원 → 대리' },
+    { rank: '대리', nextRank: '과장', nextYears: 7, minTenure: 3, note: '대리 → 과장' },
+    { rank: '과장', nextRank: '차장', nextYears: 11, minTenure: 4, note: '과장 → 차장' },
+    { rank: '차장', nextRank: '부장', nextYears: 15, minTenure: 4, note: '차장 → 부장' },
+    { rank: '부장', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사 기준 필요' },
+    { rank: '이사', nextRank: '', nextYears: null, minTenure: null, note: '능력에 따른 진급 / 별도 심사' },
+    { rank: '실장', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사' },
+    { rank: '대표이사', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사' },
   ],
   // 입사 시 인정 직급(참고용): 인정 타사 경력 개월 기준
   entryBands: [{ below: 48, rank: '사원' }, { below: 84, rank: '대리' }, { below: 132, rank: '과장' }, { below: 180, rank: '차장' }],
   entryTop: '부장 검토',
 };
+// 승진 대상 직급이 없는 예전 저장값은 비고의 "사원 → 대리"에서 읽어요
+const withNextRank = r => ({ ...r, nextRank: typeof r.nextRank === 'string' ? r.nextRank : (((/→\s*([^\s/,]+)/.exec(String(r.note || '')) || [])[1]) || '') });
 async function loadPromoRules() {
   const st = await storeGet('career-rules', CAREER_RULES_PATH, null);
   if (!st || typeof st !== 'object') return JSON.parse(JSON.stringify(DEFAULT_PROMO_RULES));
   const d = JSON.parse(JSON.stringify(DEFAULT_PROMO_RULES));
-  return { ...d, requireTenure: typeof st.requireTenure === 'boolean' ? st.requireTenure : d.requireTenure, highRate: Number.isFinite(st.highRate) ? st.highRate : d.highRate, lowRate: Number.isFinite(st.lowRate) ? st.lowRate : d.lowRate, ranks: Array.isArray(st.ranks) && st.ranks.length ? st.ranks : d.ranks };
+  return { ...d, requireTenure: typeof st.requireTenure === 'boolean' ? st.requireTenure : d.requireTenure, highRate: Number.isFinite(st.highRate) ? st.highRate : d.highRate, lowRate: Number.isFinite(st.lowRate) ? st.lowRate : d.lowRate, ranks: (Array.isArray(st.ranks) && st.ranks.length ? st.ranks : d.ranks).map(withNextRank) };
 }
 async function loadEmployees() { const v = await storeGet('employees', EMPLOYEES_PATH, []); return Array.isArray(v) ? v : []; }
 async function saveEmployees(list) { return storeSet('employees', EMPLOYEES_PATH, list); }
@@ -1792,7 +1794,7 @@ function computeCareer(emp, rules, today) {
     if (rules.requireTenure && minTen !== null) result = okTotal && okTenure ? '승진 검토 대상' : (okTotal && okTenure === false ? '근속 부족' : '기준 미달');
     else result = okTotal ? '승진 검토 대상' : '기준 미달';
   }
-  return { highMonths: hi, lowMonths: lo, careerMonths: hi + lo, recognizedMonths: recognized, tenureYears: tenure, totalYears: total, rankTenureYears: rankTenure, entryRank, nextYears: next, minTenure: minTen, result, reason };
+  return { highMonths: hi, lowMonths: lo, careerMonths: hi + lo, recognizedMonths: recognized, tenureYears: tenure, totalYears: total, rankTenureYears: rankTenure, entryRank, nextYears: next, minTenure: minTen, nextRank: (rule && next !== null && rule.nextRank) || '', result, reason };
 }
 const withCareer = (emp, rules, today) => ({ ...emp, calc: computeCareer(emp, rules, today) });
 
@@ -1885,8 +1887,10 @@ app.put('/api/career/rules', ah(async (req, res) => {
     for (const r of b.ranks) {
       const name = oneLineClean(r && r.rank, 20); if (!name) return res.status(400).json({ error: '직급 이름이 비어 있어요.' }); if (seen.has(name)) return res.status(400).json({ error: `직급 "${name}"이(가) 두 번 있어요.` }); seen.add(name);
       const nums = {}; for (const [k, label] of [['nextYears', '다음 승진 기준 누적 경력'], ['minTenure', '현 직급 최소 근속']]) { const raw = r[k]; if (raw === null || raw === undefined || raw === '') nums[k] = null; else { const n = Number(raw); if (!Number.isFinite(n) || n < 0 || n > 60) return res.status(400).json({ error: `"${name}"의 ${label}은 0~60년 사이로 입력해주세요.` }); nums[k] = n; } }
-      ranks.push({ rank: name, nextYears: nums.nextYears, minTenure: nums.minTenure, note: oneLineClean(r.note, 60) });
+      ranks.push({ rank: name, nextRank: oneLineClean(r.nextRank, 20), nextYears: nums.nextYears, minTenure: nums.minTenure, note: oneLineClean(r.note, 60) });
     }
+    const badTarget = ranks.find(r => r.nextRank && (!seen.has(r.nextRank) || r.nextRank === r.rank));
+    if (badTarget) return res.status(400).json({ error: `"${badTarget.rank}"의 승진 대상 직급은 기준 표에 있는 다른 직급이어야 해요.` });
     const used = (await loadEmployees()).map(e => e.rank).filter(x => !seen.has(x));
     if (used.length) return res.status(400).json({ error: `현재 직원이 쓰고 있는 직급(${[...new Set(used)].join('·')})은 지울 수 없어요. 먼저 그 직원의 직급을 바꿔주세요.` });
     next.ranks = ranks;
@@ -3769,13 +3773,27 @@ async function findQuestionDb(pageId) {
   }
   return null;
 }
+// ---------- 평가 사유: 노션 채용 문항 표에는 "사유" 칸이 없어서 "답변" 칸 안에 구분 표시와 함께 담아요 ----------
+// 쓰기:  답변 + "\n\n[평가 사유] " + 사유     읽기: "[평가 사유]" 표시가 있으면 나눠서 돌려주고, 없으면 전부 답변이에요(노션에서 직접 쓴 글도 그대로 읽혀요).
+const REASON_MARK = '[평가 사유]';
+function splitReason(text) {
+  const t = String(text ?? '').replace(/\r\n/g, '\n').trim();
+  const i = t.lastIndexOf('\n' + REASON_MARK);
+  if (i < 0) return t.startsWith(REASON_MARK) ? { answer: '', reason: t.slice(REASON_MARK.length).trim() } : { answer: t, reason: '' };
+  return { answer: t.slice(0, i).trim(), reason: t.slice(i + 1 + REASON_MARK.length).trim() };
+}
+function joinReason(answer, reason) {
+  const a = String(answer ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim();   // 답변 본문 안의 표시 글자는 지워서 구분이 어긋나지 않게 해요
+  const r = String(reason ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim();
+  return r ? (a ? `${a}\n\n${REASON_MARK} ${r}` : `${REASON_MARK} ${r}`) : a;
+}
 async function readQuestionRows(dbId) {
   const rows = []; let cursor = '';
   for (let n = 0; n < 3; n++) {
     const r = await notionRequest('POST', `/v1/databases/${dbId}/query`, { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) });
     for (const pg of (r.results || [])) {
       const P = pg.properties || {};
-      rows.push({ id: pg.id, no: normNo(readRich(P['No'])), type: (P['전형'] && P['전형'].select && P['전형'].select.name) || '', question: normQ(readRich(P['질문'])), answer: readRich(P['답변']).trim(), score: scoreOf(P['점수 선택'] && P['점수 선택'].select && P['점수 선택'].select.name) });
+      rows.push({ id: pg.id, no: normNo(readRich(P['No'])), type: (P['전형'] && P['전형'].select && P['전형'].select.name) || '', question: normQ(readRich(P['질문'])), ...(() => { const sp = splitReason(readRich(P['답변'])); return { answer: sp.answer, reason: sp.reason, raw: joinReason(sp.answer, sp.reason) }; })(), score: scoreOf(P['점수 선택'] && P['점수 선택'].select && P['점수 선택'].select.name) });
     }
     if (!r.has_more || !r.next_cursor) break; cursor = r.next_cursor;
   }
@@ -3800,7 +3818,7 @@ app.get('/api/interview/card', requireNotion, ah(async (req, res) => {
       try {
         const problems = await questionDbProblems(dbId);
         if (problems.length) out.table.note = '채용 문항 표는 있지만 칸이 달라요: ' + problems.join(' / ');
-        else { out.table.found = true; out.table.rows = (await readQuestionRows(dbId)).map(r => ({ no: r.no, type: r.type, question: r.question, answer: r.answer, score: r.score })); }
+        else { out.table.found = true; out.table.rows = (await readQuestionRows(dbId)).map(r => ({ no: r.no, type: r.type, question: r.question, answer: r.answer, reason: r.reason, raw: r.raw, score: r.score })); }
       } catch { out.table.note = '채용 문항 표를 읽지 못했어요.'; }
     } else if (!out.table.note) out.table.note = '이 카드에는 "채용 문항" 표가 없어요. 답변은 카드 본문에 "면접 답변 기록"으로 남겨요.';
     res.json(out);
@@ -3819,11 +3837,15 @@ app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
         type: ['필수', '선택', '맞춤'].includes(String((x && x.type) ?? '')) ? String(x.type) : '맞춤',
         question: normQ(x && x.question).slice(0, 300),
         criteria: String((x && x.criteria) ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
-        answer: String((x && x.answer) ?? '').replace(/\r\n/g, '\n').trim().slice(0, 6000),
+        answer: String((x && x.answer) ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim().slice(0, 6000),
+        reason: String((x && x.reason) ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim().slice(0, 1000),
         base: x && x.base !== undefined && x.base !== null ? String(x.base).trim() : null,
         score: Number.isInteger(sc) && sc >= 1 && sc <= 5 ? sc : 0,
       };
-    }).filter(x => x.question.length >= 4 && (x.answer || x.score));
+    }).map(x => ({ ...x, written: joinReason(x.answer, x.reason) })).filter(x => x.question.length >= 4 && (x.written || x.score));
+    // 평가 사유에 나이·결혼·가족·병역 같은 평가에 쓰면 안 되는 주제가 있으면 기록하지 않아요(채용 기록에 남지 않게)
+    const badReason = items.find(x => x.reason && IQ_BANNED.test(x.reason));
+    if (badReason) { const w = (badReason.reason.match(IQ_BANNED) || [''])[0]; return res.status(400).json({ error: `평가 사유에 "${w}"처럼 평가에 쓰면 안 되는 내용이 들어 있어요. 답변에서 관찰한 행동과 근거로만 적어주세요. (질문: ${badReason.question.slice(0, 30)})` }); }
     if (!items.length) return res.status(400).json({ error: '보낼 답변이나 점수를 하나 이상 적어주세요.' });
     let dbId = null; try { dbId = await findQuestionDb(id); } catch { dbId = null; }
     let problems = []; if (dbId) { try { problems = await questionDbProblems(dbId); } catch { problems = ['표 구조를 읽지 못했어요']; } }
@@ -3833,7 +3855,7 @@ app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
       const byNo = new Map(rows.filter(r => r.no).map(r => [r.no, r])); const byQ = new Map(rows.filter(r => r.question).map(r => [r.question, r]));
       const plan = items.map(it => ({ it, row: (it.no && byNo.get(normNo(it.no))) || byQ.get(normQ(it.question)) || null }));
       // 이 화면이 불러온 답변(base)과 노션의 현재 답변이 다르면(누가 먼저 고쳤으면) 덮어쓰기 전에 확인해요
-      const conflicts = plan.filter(({ it, row }) => row && it.answer && row.answer && row.answer !== it.answer && row.answer !== (it.base ?? '')).map(({ it, row }) => ({ no: row.no || it.no, question: it.question }));
+      const conflicts = plan.filter(({ it, row }) => row && it.written && row.raw && row.raw !== it.written && row.raw !== (it.base ?? '')).map(({ it, row }) => ({ no: row.no || it.no, question: it.question }));
       if (conflicts.length && !b.force) return res.status(409).json({ conflict: true, conflicts, error: '노션에 이미 다른 답변이 적혀 있는 질문이 있어요.' });
       let created = 0, updated = 0, skipped = 0; const failed = [];
       const maxC = Math.max(0, ...rows.map(r => /^C_(\d+)$/.test(r.no) ? Number(RegExp.$1) : 0)); let seq = maxC;
@@ -3843,14 +3865,14 @@ app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
         try {
           if (job.kind === 'update') {
             const props = {};
-            if (it.answer && it.answer !== job.row.answer) props['답변'] = { rich_text: richChunks(it.answer) };
+            if (it.written && it.written !== job.row.raw) props['답변'] = { rich_text: richChunks(it.written) };
             if (it.score && it.score !== job.row.score) props['점수 선택'] = { select: { name: '⭐'.repeat(it.score) } };
             if (!Object.keys(props).length) { skipped++; return; }
             await notionRequest('PATCH', `/v1/pages/${job.row.id}`, { properties: props }); updated++;
           } else {
             const props = { '질문': { title: [{ type: 'text', text: { content: it.question } }] }, 'No': { rich_text: richChunks(job.code) }, '전형': { select: { name: it.type === '필수' ? '필수질문' : '선택질문' } } };
             if (it.criteria) props['기준'] = { rich_text: richChunks(it.criteria) };
-            if (it.answer) props['답변'] = { rich_text: richChunks(it.answer) };
+            if (it.written) props['답변'] = { rich_text: richChunks(it.written) };
             if (it.score) props['점수 선택'] = { select: { name: '⭐'.repeat(it.score) } };
             await notionRequest('POST', '/v1/pages', { parent: { database_id: dbId }, properties: props }); created++;
           }
@@ -3870,6 +3892,7 @@ app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
     for (const it of items) {
       blocks.push(nBullet(`${it.no ? `[${it.no}] ` : ''}${it.question}${it.score ? `  ${'⭐'.repeat(it.score)}` : ''}`));
       if (it.answer) blocks.push(nNote(`답변: ${it.answer}`));
+      if (it.reason) blocks.push(nNote(`평가 사유: ${it.reason}`));
     }
     await appendBlocks(id, blocks.slice(0, 100));
     res.json({ success: true, target: 'body', updated: 0, created: 0, skipped: 0, failed: [], count: items.length, note: dbId ? '채용 문항 표의 칸이 달라서 카드 본문에 기록했어요: ' + problems.join(' / ') : '이 카드에는 채용 문항 표가 없어서 카드 본문에 기록했어요.' });
