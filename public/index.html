@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-21">
+<html lang="ko" data-app-version="2026.10.21-22">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -522,6 +522,11 @@
           <button id="batchRunBtn" class="add-btn" type="button">점수 보기</button>
           <button id="batchClearBtn" class="link-btn" type="button">목록 비우기</button>
           <select id="batchSort" aria-label="정렬"><option value="score">총점 높은 순</option><option value="file">올린 순서</option></select>
+        </div>
+        <div id="batchMergeBar" class="batch-merge-bar" hidden>
+          <span class="manage-hint" style="margin:0"><strong>한 사람의 서류가 여러 개라면</strong>(이력서·포트폴리오·자기소개서 등) 줄 앞의 "묶기"를 체크해 <strong>한 명으로 묶으면</strong> AI가 모두 함께 읽고 <strong>통합해서 점수를 한 번</strong>만 매겨요(한 사람당 최대 4개·합계 4MB).</span>
+          <button id="batchMergeBtn" class="link-btn" type="button">선택한 줄 한 명으로 묶기</button>
+          <button id="batchMergeSuggestBtn" class="link-btn" type="button">같은 이름끼리 묶기 제안</button>
         </div>
         <div id="batchPostingChips" class="batch-posting-chips" role="group" aria-label="공고별 보기" hidden></div>
         <div class="import-box" data-edit="resume">

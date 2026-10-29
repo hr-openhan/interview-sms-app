@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-21';
+const APP_VERSION = '2026.10.21-22';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -4558,6 +4558,7 @@ let batchRunning = false;
 function setBatchStatus(msg, cls) { batchStatus.textContent = msg || ''; batchStatus.className = 'status' + (cls ? ' ' + cls : ''); }
 function batchSizeText(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB'; }
 function batchInfoRefresh() {
+  const mb = document.getElementById('batchMergeBar'); if (mb) mb.hidden = batchRows.filter(r => (r.state === 'wait' || r.state === 'err') && r.file && !(r.reg && r.reg.id)).length < 2;
   const waiting = batchRows.filter(r => r.state === 'wait').length;
   batchFileInfo.textContent = batchRows.length ? `올린 이력서 ${batchRows.length}개 (아직 점수 안 본 것 ${waiting}개)` : '';
   batchTable.hidden = !batchRows.length;
@@ -4565,7 +4566,8 @@ function batchInfoRefresh() {
 // 같은 이름의 파일을 또 올리면 "마지막 파일"로 바꿔요(같은 사람이 두 줄로 쌓이지 않게). 이름은 대소문자·앞뒤 공백만 무시하고 그대로 비교해요.
 const batchFileKey = name => String(name || '').trim().toLowerCase();
 // 같은 이름의 줄이 있으면 그 줄을 찾아 돌려줘요. 점수를 보는 중이거나 이미 노션에 기록한 줄은 바꾸지 않아요(진행 중 요청·기록 표시가 어긋나지 않게).
-function batchFindSameFile(name) { const k = batchFileKey(name); return batchRows.find(r => r.file && batchFileKey(r.file.name) === k); }
+function batchFindSameFile(name) { const k = batchFileKey(name); return batchRows.find(r => (r.files || (r.file ? [r.file] : [])).some(x => batchFileKey(x.name) === k)); }
+const batchFilesOf = row => row.files || (row.file ? [row.file] : []);
 batchFilesEl.addEventListener('change', () => {
   const skipped = []; let replaced = 0;
   for (const f of [...batchFilesEl.files]) {
@@ -4576,9 +4578,14 @@ batchFilesEl.addEventListener('change', () => {
     if (same) {
       if (same.state === 'run') { skipped.push(`${f.name} (같은 이름의 파일이 점수를 보는 중이에요. 끝난 뒤 다시 올려주세요)`); continue; }
       if (same.reg && same.reg.id) { skipped.push(`${f.name} (같은 이름의 파일이 이미 노션에 서류 합격으로 기록됐어요. 바꾸지 않았어요)`); continue; }
+      if (batchFilesOf(same).length > 1) {   // 여러 서류를 묶은 줄 안의 같은 이름 파일: 그 파일만 바꾸고 묶음은 유지해요(점수는 지워져요)
+        const k = batchFileKey(f.name); const rest = batchFilesOf(same).filter(x => batchFileKey(x.name) !== k);
+        if (rest.reduce((n, x) => n + x.size, 0) + f.size > PDF_MAX_BYTES) { skipped.push(`${f.name} (묶음 합계가 ${Math.round(PDF_MAX_BYTES / 1048576)}MB를 넘어서 바꾸지 못했어요)`); continue; }
+        same.files = [...rest, f]; same.file = same.files[0]; same.state = 'wait'; same.result = null; same.error = ''; same.picked = false; replaced++; continue;
+      }
       batchRows = batchRows.filter(r => r !== same); replaced++;   // 마지막으로 올린 파일로 교체(맨 뒤에 새로 추가돼요)
     } else if (batchRows.length >= BATCH_MAX_FILES) { skipped.push(`${f.name} (최대 ${BATCH_MAX_FILES}개까지예요)`); continue; }
-    batchRows.push({ id: ++batchSeq, file: f, state: 'wait', result: null, error: '', positionId: '', open: false, reg: null });
+    batchRows.push({ id: ++batchSeq, file: f, files: [f], state: 'wait', result: null, error: '', positionId: '', open: false, reg: null });
   }
   batchFilesEl.value = '';
   batchRender(); batchInfoRefresh();
@@ -4644,7 +4651,7 @@ function batchRender() {
   batchBody.innerHTML = batchSorted().map((row, idx) => {
     const r = row.result;
     const cand = (r && r.candidate) || {};
-    const name = r ? (cand.name || '(이름을 못 읽었어요)') : (row.file ? row.file.name : '(가져온 결과)');
+    const name = r ? (cand.name || '(이름을 못 읽었어요)') : (row.file ? (batchFilesOf(row).length > 1 ? `서류 ${batchFilesOf(row).length}개 묶음` : row.file.name) : '(가져온 결과)');
     let cells;
     if (row.state === 'ok' && !r) { row.state = 'err'; row.error = '평가 결과를 불러오지 못했어요. "다시 평가"를 눌러주세요.'; }   // 한 줄이 어긋나도 표 전체가 깨지지 않게
     if (row.state === 'ok') {
@@ -4658,7 +4665,10 @@ function batchRender() {
     const btns = row.state === 'ok'
       ? pick + `<button type="button" class="link-btn batch-detail-btn">${row.open ? '접기' : '점수표'}</button> ` + (row.reg && row.reg.id ? ((canEdit('send') ? '<button type="button" class="add-btn batch-sms-btn">📨 면접 문자</button> ' : '') + (canEdit('schedule') ? '<button type="button" class="link-btn batch-sch-btn">📅 일정 등록</button> ' : '') + (row.reg.url ? `<a class="link-btn" href="${escapeHtml(row.reg.url)}" target="_blank" rel="noopener noreferrer">노션에서 열기</a>` : '')) : '<button type="button" class="add-btn batch-reg-btn">서류 합격 확정</button>')
       : (row.state === 'err' ? '<button type="button" class="link-btn batch-retry-btn">다시 평가</button>' : '') + (row.state === 'wait' || row.state === 'err' ? ' <button type="button" class="link-btn batch-remove-btn">빼기</button>' : '');
-    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일"><strong>${escapeHtml(name)}</strong>${reg}<span class="ap-sub">${row.file ? `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}` : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
+    const canMerge = (row.state === 'wait' || row.state === 'err') && row.file && !(row.reg && row.reg.id);
+    const mergeChk = canMerge ? `<label class="check-chip batch-merge-chk-chip"><input type="checkbox" class="batch-merge-chk"${row.merge ? ' checked' : ''} /> 묶기</label>` : '';
+    const ungroup = canMerge && batchFilesOf(row).length > 1 ? ' <button type="button" class="link-btn batch-ungroup-btn">묶음 풀기</button>' : '';
+    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일">${mergeChk}<strong>${escapeHtml(name)}</strong>${reg}${ungroup}<span class="ap-sub">${row.file ? (batchFilesOf(row).length > 1 ? `<span title="${escapeHtml(batchFilesOf(row).map(x => x.name).join('\n'))}">📎 서류 ${batchFilesOf(row).length}개 묶음 · ${batchSizeText(batchFilesOf(row).reduce((n, x) => n + x.size, 0))}<br>${escapeHtml(batchFilesOf(row).map(x => x.name).join(', '))}</span>` : `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}`) : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
     return main + (row.open && row.state === 'ok' ? batchDetailHtml(row) : '');
   }).join('');
   batchBody.querySelectorAll('tr.batch-detail').forEach(async d => {
@@ -4699,12 +4709,72 @@ function batchDetailHtml(row) {
   </td></tr>`;
 }
 
+// ---------- 한 사람의 서류 여러 개를 한 명으로 묶기 ----------
+// 묶음 본문(서버 형식): [파일 수 4바이트] 파일마다 [이름 길이 4바이트][이름 UTF-8][내용 크기 4바이트][PDF 내용] (big-endian)
+async function batchBundleBody(files) {
+  const u32 = n => { const b = new ArrayBuffer(4); new DataView(b).setUint32(0, n, false); return b; };
+  const enc = new TextEncoder(); const parts = [u32(files.length)];
+  for (const f of files) { const nb = enc.encode(f.name); parts.push(u32(nb.length), nb, u32(f.size), await f.arrayBuffer()); }
+  return new Blob(parts, { type: 'application/octet-stream' });
+}
+const BATCH_GROUP_MAX_FILES = 4;
+// 흔한 서류 이름·직무 말(사람 이름이 아니에요). 파일 이름에서 "같은 사람" 후보를 찾을 때 걸러요.
+const BATCH_NAME_STOP = new Set(['이력서', '파일이력서', '포트폴리오', '자기소개서', '자소서', '경력기술서', '경력', '지원서', '이력', '서류', '첨부', '제출', '원본', '최종', '수정', '영문', '국문', '사본', '정규직', '신입', '채용', '공고', '온라인', '오프라인', '백화점', '아울렛', '영업', '기획', '패션', '디자인', '마케팅', '운영', '관리', '그로잉업팀', '그로잉업', '리포트', '발표', '보고서', '위원회', '재고', '사업', '프로젝트', '리뷰', '투자', '승인서', '계획', '실적', '현황', '자료']);
+function batchNameTokens(fname) {
+  return [...new Set(String(fname || '').replace(/\.[A-Za-z0-9]+$/, '').split(/[_\s\-.()\[\]]+/).filter(t => /^[가-힣]{2,4}$/.test(t) && !BATCH_NAME_STOP.has(t)))];
+}
+// 선택한 줄들을 한 줄로 합쳐요. 합칠 수 없는 줄이 있으면 이유를 알려주고 아무것도 바꾸지 않아요.
+function batchMergeRows(rows) {
+  if (rows.length < 2) return { ok: false, msg: '묶을 줄을 2개 이상 골라주세요.' };
+  if (rows.some(r => r.state === 'run' || (r.reg && r.reg.id) || !r.file)) return { ok: false, msg: '점수를 보는 중이거나 이미 노션에 기록한 줄, 가져온 결과는 묶을 수 없어요.' };
+  const files = rows.flatMap(batchFilesOf);
+  const seen = new Set(); for (const f of files) { const k = batchFileKey(f.name); if (seen.has(k)) return { ok: false, msg: `같은 이름의 파일(${f.name})이 있어서 묶지 않았어요.` }; seen.add(k); }
+  if (files.length > BATCH_GROUP_MAX_FILES) return { ok: false, msg: `한 사람의 서류는 최대 ${BATCH_GROUP_MAX_FILES}개까지 묶을 수 있어요(지금 ${files.length}개).` };
+  const total = files.reduce((n, f) => n + f.size, 0);
+  if (total > PDF_MAX_BYTES) return { ok: false, msg: `서류 합계가 ${batchSizeText(total)}라서 ${Math.round(PDF_MAX_BYTES / 1048576)}MB를 넘어요. 파일을 줄이거나 나눠서 올려주세요.` };
+  const first = rows[0]; first.files = files; first.file = files[0]; first.state = 'wait'; first.result = null; first.error = ''; first.picked = false; first.merge = false; first.positionId = '';
+  batchRows = batchRows.filter(r => r === first || !rows.includes(r));
+  return { ok: true, first, count: files.length };
+}
+document.getElementById('batchMergeBtn').addEventListener('click', () => {
+  if (batchRunning) { setBatchStatus('점수를 보는 중에는 묶을 수 없어요.', 'err'); return; }
+  const rows = batchRows.filter(r => r.merge); const r = batchMergeRows(rows);
+  if (!r.ok) { setBatchStatus(r.msg, 'err'); return; }
+  batchRender(); batchInfoRefresh(); setBatchStatus(`서류 ${r.count}개를 한 명으로 묶었어요. "점수 보기"를 누르면 모두 함께 읽고 통합해서 점수를 한 번만 매겨요.`, 'ok');
+});
+document.getElementById('batchMergeSuggestBtn').addEventListener('click', () => {
+  if (batchRunning) { setBatchStatus('점수를 보는 중에는 묶을 수 없어요.', 'err'); return; }
+  const cand = batchRows.filter(r => (r.state === 'wait' || r.state === 'err') && r.file && !(r.reg && r.reg.id));
+  const byTok = new Map(); cand.forEach(r => batchFilesOf(r).forEach(f => batchNameTokens(f.name).forEach(t => { if (!byTok.has(t)) byTok.set(t, new Set()); byTok.get(t).add(r); })));
+  const groups = []; const used = new Set();
+  [...byTok.entries()].filter(([, s]) => s.size >= 2).sort((x, y) => y[1].size - x[1].size).forEach(([tok, s]) => {
+    const rows = [...s].filter(r => !used.has(r)); if (rows.length < 2) return;
+    if (rows.flatMap(batchFilesOf).length > BATCH_GROUP_MAX_FILES || rows.flatMap(batchFilesOf).reduce((n, f) => n + f.size, 0) > PDF_MAX_BYTES) return;   // 안 맞는 묶음은 제안하지 않아요(직접 묶어주세요)
+    rows.forEach(r => used.add(r)); groups.push({ tok, rows });
+  });
+  if (!groups.length) { setBatchStatus('같은 이름으로 묶을 만한 파일을 찾지 못했어요(파일 이름에 같은 사람 이름이 2개 이상 들어 있어야 해요). 직접 "묶기"를 체크해 묶어주세요.', 'err'); return; }
+  const list = groups.map(g => `- ${g.tok}: ${g.rows.flatMap(batchFilesOf).map(f => f.name).join(', ')}`).join('\n');
+  if (!confirm(`아래처럼 같은 사람의 서류로 보고 묶을까요? (${groups.length}명)\n${list}\n\n이름이 같아 보여도 다른 사람일 수 있어요. 틀린 묶음은 "묶음 풀기"로 되돌릴 수 있어요.`)) return;
+  let done = 0; groups.forEach(g => { if (batchMergeRows(g.rows).ok) done++; });
+  batchRender(); batchInfoRefresh(); setBatchStatus(`${done}명의 서류를 묶었어요. "점수 보기"를 누르면 묶음마다 통합해서 점수를 한 번만 매겨요.`, 'ok');
+});
+batchBody.addEventListener('change', e => { const c = e.target.closest('.batch-merge-chk'); if (!c) return; const tr = c.closest('tr[data-id]'); const row = batchRows.find(r => r.id === Number(tr.dataset.id)); if (row) row.merge = c.checked; });
+batchBody.addEventListener('click', e => {
+  const b = e.target.closest('.batch-ungroup-btn'); if (!b) return;
+  const tr = b.closest('tr[data-id]'); const row = batchRows.find(r => r.id === Number(tr.dataset.id)); if (!row || batchRunning) return;
+  const fl = batchFilesOf(row); const idx = batchRows.indexOf(row);
+  const rows = fl.map((f, i) => i === 0 ? row : { id: ++batchSeq, file: f, files: [f], state: 'wait', result: null, error: '', positionId: '', open: false, reg: null });
+  row.files = [fl[0]]; row.file = fl[0]; row.state = 'wait'; row.result = null; row.error = ''; row.merge = false;
+  batchRows.splice(idx, 1, ...rows); batchRender(); batchInfoRefresh(); setBatchStatus(`묶음을 풀어서 서류 ${fl.length}개가 따로 줄이 됐어요.`, 'ok');
+});
+
 async function batchEvaluate(row, positionId) {
   row.state = 'run'; row.error = ''; row.positionId = positionId; batchRender();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
   try {
-    const res = await fetch('/api/resume/analyze?positionId=' + encodeURIComponent(positionId) + (document.getElementById('batchUsePeers').checked ? '&peers=1' : ''), { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file, signal: controller.signal });
+    const fl = batchFilesOf(row); const multi = fl.length > 1;   // 한 사람의 서류가 여러 개면 한꺼번에 보내 통합해서 평가해요
+    const res = await fetch((multi ? '/api/resume/analyze-multi' : '/api/resume/analyze') + '?positionId=' + encodeURIComponent(positionId) + (document.getElementById('batchUsePeers').checked ? '&peers=1' : ''), { method: 'POST', headers: { 'Content-Type': multi ? 'application/octet-stream' : 'application/pdf' }, body: multi ? await batchBundleBody(fl) : row.file, signal: controller.signal });
     const data = await readJsonOrNull(res);
     if (!data) throw new Error(res.status === 413 ? '파일이 너무 커서 서버가 받지 못했어요.' : '서버가 응답하지 못했어요.');
     if (!res.ok || !data.success) throw new Error(data.error || '평가 실패');
@@ -4871,8 +4941,12 @@ async function batchRecordOne(row) {
   let pdfMsg = '';
   if (!row.file) return { ok: true, msg: '노션에 서류 합격으로 기록했어요 (가져온 결과라 이력서 PDF는 붙이지 않았어요).' };
   try {   // 이력서 PDF도 붙여요(실패해도 카드는 이미 만들어졌어요)
-    const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file });
-    const ad = await readJsonOrNull(ar); if (!ar.ok) throw new Error((ad && ad.error) || '첨부 실패');
+    const fl = batchFilesOf(row); const failedFiles = [];
+    for (let i = 0; i < fl.length; i++) {   // 묶음이면 서류마다 한 번씩 붙여요(이름은 원래 파일 이름)
+      const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(fl.length > 1 ? `${name}_${fl[i].name}` : name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: fl[i] });
+      const ad = await readJsonOrNull(ar); if (!ar.ok) failedFiles.push(`${fl[i].name}: ${(ad && ad.error) || '첨부 실패'}`);
+    }
+    if (failedFiles.length) throw new Error(failedFiles.join(' / '));
   } catch (err) { pdfMsg = ` (이력서 PDF는 붙이지 못했어요: ${err.message || ''})`; }
   return { ok: true, msg: `노션에 서류 합격으로 기록했어요${pdfMsg}.`, pdfFail: !!pdfMsg };
 }
@@ -4931,10 +5005,14 @@ async function batchRegister(row, tr, force) {
     if (!row.file) { setBatchStatus(`${name} 님을 서류 합격으로 확정해 노션에 등록했어요 (가져온 결과라 이력서 PDF는 붙이지 않았어요). 이어서 줄의 "📨 면접 문자"로 면접 문자를 보내세요.`, 'ok'); return; }
     // 이력서 PDF도 붙임 (실패해도 카드는 이미 만들어졌으니 안내만)
     try {
-      const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file });
-      const ad = await readJsonOrNull(ar);
-      if (!ar.ok) throw new Error((ad && ad.error) || '첨부 실패');
-      setBatchStatus(`${name} 님을 서류 합격으로 확정해 노션에 등록하고 이력서 PDF도 붙였어요. 이어서 줄의 "📨 면접 문자"로 면접 문자를 보내세요.`, 'ok');
+      const fl = batchFilesOf(row); const failedFiles = [];
+      for (let i = 0; i < fl.length; i++) {
+        const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(fl.length > 1 ? `${name}_${fl[i].name}` : name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: fl[i] });
+        const ad = await readJsonOrNull(ar);
+        if (!ar.ok) failedFiles.push(`${fl[i].name}: ${(ad && ad.error) || '첨부 실패'}`);
+      }
+      if (failedFiles.length) throw new Error(failedFiles.join(' / '));
+      setBatchStatus(`${name} 님을 서류 합격으로 확정해 노션에 등록하고 ${fl.length > 1 ? `서류 ${fl.length}개를` : '이력서 PDF도'} 붙였어요. 이어서 줄의 "📨 면접 문자"로 면접 문자를 보내세요.`, 'ok');
     } catch (err) {
       setBatchStatus(`${name} 님은 서류 합격으로 확정돼 노션에 등록됐지만 PDF는 붙이지 못했어요: ${err.message || ''} (노션에서 직접 붙이거나, 위 "이력서 평가"에서 같은 PDF로 다시 시도해주세요)`, 'err');
     }
