@@ -1966,3 +1966,36 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .batch-recmsg.err { color: #b0432f; }
 
 #batchRecordBtn:disabled { opacity: .5; cursor: not-allowed; }
+
+
+/* 공고 관리 안의 전환 막대(이력서 검토 / 공고 만들기) */
+.manage-subnav { display: flex; gap: 6px; margin: 0 0 10px; }
+.manage-subnav .sub-btn { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); font: inherit; font-size: 13.5px; cursor: pointer; color: var(--ink, #3b362c); }
+.manage-subnav .sub-btn.active { background: var(--accent, #a8552c); border-color: var(--accent, #a8552c); color: #fff; font-weight: 700; }
+
+/* 승진·경력 관리 */
+.career-summary { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
+.career-chip { padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.career-chip.on { background: var(--accent, #a8552c); color: #fff; border-color: var(--accent, #a8552c); }
+.career-toolbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
+.career-toolbar input[type="search"], .career-toolbar select { padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 13px; }
+.career-editor { margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.career-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 12px; margin: 8px 0; }
+.career-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: #6b6558; }
+.career-form input, .career-form select { padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 13px; color: #2b2620; }
+.career-form .cf-wide { grid-column: 1 / -1; }
+.career-careers { margin: 10px 0; }
+.cf-career-row { display: grid; grid-template-columns: minmax(110px, 1.4fr) 90px minmax(150px, 1.2fr) minmax(110px, 1.4fr) auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+.cf-career-row input, .cf-career-row select { min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 13px; }
+@media (max-width: 720px) { .cf-career-row { grid-template-columns: 1fr 1fr; } .cf-career-row .cc-note { grid-column: 1 / -1; } }
+.career-result { display: inline-block; padding: 1px 9px; border-radius: 9px; font-size: 12.5px; background: #ece9e1; color: #6b6558; }
+.career-result.ok { background: #e3f0e5; color: #2f6b3b; font-weight: 700; }
+.career-result.warn { background: #fff1d6; color: #8a5a1f; }
+.career-result.info { background: #e6edf7; color: #3b5a85; }
+.career-reason { display: block; max-width: 220px; }
+.career-rules { margin-top: 14px; }
+.career-rules input[type="number"], .career-rules input[type="text"], .career-rules td input { width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font: inherit; font-size: 13px; }
+.career-table td .ap-sub { display: block; }
+
+.career-rank-scroll { overflow-x: auto; max-width: 100%; margin-top: 6px; }
+.career-rank-scroll table { min-width: 440px; }

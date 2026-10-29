@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-16';
+const APP_VERSION = '2026.10.21-18';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -653,21 +653,173 @@ sendBtn.addEventListener('click', () => handleSend());
 // ---------- 탭 전환 ----------
 function showTab(tab) {
   if (typeof interviewDirty === 'function' && interviewDirty() && tab !== 'interview' && !confirm('면접 관리에 보내지 않은 답변이 있어요. 다른 탭으로 가도 작성한 답변은 이 화면에 남지만, 새로고침하거나 지원자를 바꾸면 사라져요.\n\n그래도 이동할까요?')) return;
-  tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (tab === 'resume' || tab === 'posting') lastManageTab = tab;   // 공고 관리를 다시 누르면 직전에 보던 화면을 열어요
+  tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.dataset.group === 'manage' && (tab === 'resume' || tab === 'posting'))));
+  document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === tab));
   sendView.hidden = tab !== 'send';
   resumeView.hidden = tab !== 'resume';
   postingView.hidden = tab !== 'posting';
   interviewView.hidden = tab !== 'interview';
+  document.getElementById('careerView').hidden = tab !== 'career';
   manageView.hidden = tab !== 'manage';
   if (tab === 'manage') refreshTemplateManageSelect();
   if (tab === 'resume' || tab === 'posting') loadResumeData();
   if (tab === 'interview') loadApplicants(true);   // 면접 관리 = 노션 지원자 목록(예전 지원자 관리) + 면접 질문·답변
   if (tab === 'send') loadTemplates(); // 양식 변경사항 반영
+  if (tab === 'career' && typeof careerLoad === 'function') careerLoad();
 }
 
+let lastManageTab = 'resume';
 tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+  btn.addEventListener('click', () => showTab(btn.dataset.group === 'manage' ? lastManageTab : btn.dataset.tab));
 });
+document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.addEventListener('click', () => showTab(b.dataset.sub)));
+
+// ---------- 승진·경력 관리 ----------
+// 직원 경력과 승진 검토. 계산은 서버가 해요(엑셀과 같은 규칙). 화면은 보여주고, 입력 중인 타사 경력의 "인정 경력"만 같은 공식으로 미리 계산해요.
+const careerEls = { body: document.getElementById('careerBody'), summary: document.getElementById('careerSummary'), status: document.getElementById('careerStatus'), empty: document.getElementById('careerEmpty') };
+let careerData = null, careerEditId = '', careerDirty = false;
+const CAREER_RESULT_CLASS = { '승진 검토 대상': 'ok', '근속 부족': 'warn', '기준 미달': '', '별도 심사': 'info', '정보 확인 필요': 'warn', '직급 확인': 'warn' };
+const careerSay = (m, c) => { careerEls.status.textContent = m || ''; careerEls.status.className = 'status' + (c ? ' ' + c : ''); };
+async function careerLoad() {
+  try {
+    const res = await fetch('/api/career/employees'); const j = await readJsonOrNull(res);
+    if (!j) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
+    if (!res.ok) throw new Error(j.error || '직원 목록을 불러오지 못했어요.');
+    careerData = j; careerFillFilters(); careerRender(); careerRulesFill();
+    careerSay(j.employees.length ? '' : '등록된 직원이 없어요. "직원 등록"으로 추가하거나 직원 파일(.json)을 가져오세요.');
+  } catch (err) { careerSay(err.message || '불러오는 중 오류가 발생했어요.', 'err'); }
+}
+function careerFillFilters() {
+  const keep = (sel, vals, label) => { const cur = sel.value; sel.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(''); sel.value = vals.includes(cur) ? cur : ''; };
+  const ranks = careerData.rules.ranks.map(r => r.rank); const places = [...new Set(careerData.employees.map(e => e.workplace).filter(Boolean))];
+  keep(document.getElementById('careerRankFilter'), ranks, '전체 직급'); keep(document.getElementById('careerPlaceFilter'), places, '전체 근무지');
+  document.getElementById('cfRank').innerHTML = ranks.map(r => `<option>${escapeHtml(r)}</option>`).join('');
+  document.getElementById('cfPlaceList').innerHTML = places.map(p => `<option value="${escapeHtml(p)}">`).join('');
+}
+function careerRender() {
+  if (!careerData) return;
+  const q = document.getElementById('careerSearch').value.trim().toLowerCase(), rank = document.getElementById('careerRankFilter').value, place = document.getElementById('careerPlaceFilter').value, resf = document.getElementById('careerResultFilter').value, sort = document.getElementById('careerSort').value;
+  const order = careerData.rules.ranks.map(r => r.rank);
+  let list = careerData.employees.filter(e => (!q || e.name.toLowerCase().includes(q) || String(e.empNo).toLowerCase().includes(q) || String(e.engName).toLowerCase().includes(q)) && (!rank || e.rank === rank) && (!place || e.workplace === place) && (!resf || e.calc.result === resf));
+  list.sort((x, y) => sort === 'name' ? x.name.localeCompare(y.name, 'ko') : sort === 'hire' ? String(x.hireDate).localeCompare(String(y.hireDate)) : sort === 'rank' ? (order.indexOf(y.rank) - order.indexOf(x.rank)) || (y.calc.totalYears - x.calc.totalYears) : (y.calc.totalYears ?? -1) - (x.calc.totalYears ?? -1));
+  const sm = careerData.summary, by = sm.byResult || {};
+  careerEls.summary.innerHTML = [['', `전체 ${sm.total}명`], ['승진 검토 대상', `승진 검토 대상 ${by['승진 검토 대상'] || 0}`], ['근속 부족', `근속 부족 ${by['근속 부족'] || 0}`], ['별도 심사', `별도 심사 ${by['별도 심사'] || 0}`], ['기준 미달', `기준 미달 ${by['기준 미달'] || 0}`]].map(([k, t]) => `<button type="button" class="career-chip ${resf === k ? 'on' : ''}" data-result="${escapeHtml(k)}">${escapeHtml(t)}</button>`).join('') + `<span class="manage-hint" style="margin:0">기준일 ${escapeHtml(careerData.today)}${careerData.rules.requireTenure ? ' · 누적 경력과 현 직급 근속을 모두 봐요' : ' · 누적 경력만 봐요'}</span>`;
+  careerEls.body.innerHTML = list.map(e => {
+    const c = e.calc; const cls = CAREER_RESULT_CLASS[c.result] || '';
+    return `<tr data-id="${escapeHtml(e.id)}">
+      <td data-label="직원"><strong>${escapeHtml(e.name)}</strong>${e.engName ? ` <span class="ap-sub">(${escapeHtml(e.engName)})</span>` : ''}<span class="ap-sub">${e.empNo ? '사번 ' + escapeHtml(e.empNo) + ' · ' : ''}${escapeHtml(e.employmentType || '')}</span></td>
+      <td data-label="근무지">${escapeHtml(e.workplace || '-')}</td>
+      <td data-label="입사일">${escapeHtml(e.hireDate || '-')}<span class="ap-sub">당사 ${c.tenureYears ?? '-'}년</span></td>
+      <td data-label="직급"><strong>${escapeHtml(e.rank)}</strong><span class="ap-sub">${e.appointDate ? '발령 ' + escapeHtml(e.appointDate) : '입사와 같음'}</span></td>
+      <td data-label="인정 타사 경력">${c.recognizedMonths ? `${c.recognizedMonths}개월 <span class="ap-sub">높음 ${c.highMonths} · 낮음 ${c.lowMonths}${c.entryRank ? ' · 입사 시 ' + escapeHtml(c.entryRank) : ''}</span>` : '<span class="ap-sub">없음</span>'}</td>
+      <td data-label="누적 경력"><strong>${c.totalYears ?? '-'}</strong>년${c.nextYears != null ? `<span class="ap-sub">기준 ${c.nextYears}년</span>` : ''}</td>
+      <td data-label="현 직급 근속">${c.rankTenureYears ?? '-'}년${c.minTenure != null ? `<span class="ap-sub">최소 ${c.minTenure}년</span>` : ''}</td>
+      <td data-label="승진 판정"><span class="career-result ${cls}" title="${escapeHtml(c.reason)}">${escapeHtml(c.result)}</span><span class="ap-sub career-reason">${escapeHtml(c.reason)}</span></td>
+      <td class="posting-row-actions"><button type="button" class="career-edit" data-edit="career">수정</button><button type="button" class="career-del" data-edit="career">삭제</button></td>
+    </tr>`;
+  }).join('');
+  careerEls.empty.hidden = !!list.length || !careerData.employees.length;
+}
+['careerSearch', 'careerRankFilter', 'careerPlaceFilter', 'careerResultFilter', 'careerSort'].forEach(id => document.getElementById(id).addEventListener(id === 'careerSearch' ? 'input' : 'change', careerRender));
+careerEls.summary.addEventListener('click', e => { const b = e.target.closest('.career-chip'); if (!b) return; const sel = document.getElementById('careerResultFilter'); sel.value = sel.value === b.dataset.result ? '' : b.dataset.result; careerRender(); });
+// ---- 등록·수정 폼 ----
+const cf = id => document.getElementById(id);
+function cfCareerRow(c = {}) {
+  const d = document.createElement('div'); d.className = 'cf-career-row';
+  d.innerHTML = `<input class="cc-company" maxlength="60" placeholder="회사 (선택)" aria-label="회사" value="${escapeHtml(c.company || '')}" />
+    <input class="cc-months" type="number" min="0" max="600" step="1" placeholder="개월" aria-label="경력 개월" value="${c.months ? escapeHtml(String(c.months)) : ''}" />
+    <select class="cc-rel" aria-label="직무 연관성"><option value="high"${c.relevance === 'high' ? ' selected' : ''}>연관성 높음 (70%)</option><option value="low"${c.relevance !== 'high' ? ' selected' : ''}>연관성 낮음 (20%)</option></select>
+    <input class="cc-note" maxlength="100" placeholder="메모 (선택)" aria-label="메모" value="${escapeHtml(c.note || '')}" />
+    <button type="button" class="link-btn cc-del" aria-label="이 경력 삭제">삭제</button>`;
+  d.querySelectorAll('input,select').forEach(i => i.addEventListener('input', () => { careerDirty = true; cfPreview(); }));
+  d.querySelector('.cc-del').addEventListener('click', () => { d.remove(); careerDirty = true; cfPreview(); });
+  return d;
+}
+function cfCollectCareers() { return [...cf('cfCareers').querySelectorAll('.cf-career-row')].map(r => ({ company: r.querySelector('.cc-company').value, months: r.querySelector('.cc-months').value === '' ? 0 : Number(r.querySelector('.cc-months').value), relevance: r.querySelector('.cc-rel').value, note: r.querySelector('.cc-note').value })); }
+function cfPreview() {
+  const rules = (careerData && careerData.rules) || { highRate: 70, lowRate: 20 }; const cs = cfCollectCareers();
+  const hi = cs.filter(c => c.relevance === 'high').reduce((n, c) => n + (c.months || 0), 0), lo = cs.filter(c => c.relevance !== 'high').reduce((n, c) => n + (c.months || 0), 0);
+  const rec = Math.round((hi * rules.highRate / 100 + lo * rules.lowRate / 100 + Number.EPSILON) * 100) / 100;
+  cf('cfPreview').textContent = `인정 경력 미리 계산: 높음 ${hi}개월 × ${rules.highRate}% + 낮음 ${lo}개월 × ${rules.lowRate}% = ${rec}개월 (${Math.round(rec / 12 * 100) / 100}년)`;
+}
+function cfOpen(emp) {
+  careerEditId = emp ? emp.id : ''; careerDirty = false; cf('cfStatus').textContent = ''; cf('cfStatus').className = 'status';
+  cf('careerEditorTitle').textContent = emp ? `직원 수정 · ${emp.name}` : '직원 등록';
+  const v = emp || {}; cf('cfName').value = v.name || ''; cf('cfEmpNo').value = v.empNo || ''; cf('cfEng').value = v.engName || ''; cf('cfBirth').value = v.birthDate || ''; cf('cfType').value = v.employmentType || '정직원'; cf('cfPlace').value = v.workplace || ''; cf('cfHire').value = v.hireDate || ''; cf('cfRank').value = v.rank || cf('cfRank').options[0].value; cf('cfAppoint').value = v.appointDate || ''; cf('cfNote').value = v.note || '';
+  cf('cfCareers').innerHTML = ''; (v.careers || []).forEach(c => cf('cfCareers').appendChild(cfCareerRow(c))); cfPreview();
+  cf('careerEditor').hidden = false; cf('careerEditor').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); cf('cfName').focus();
+}
+function cfClose() { if (careerDirty && !confirm('저장하지 않은 내용이 있어요. 닫으면 사라져요.\n\n그래도 닫을까요?')) return false; cf('careerEditor').hidden = true; careerEditId = ''; careerDirty = false; return true; }
+['cfName', 'cfEmpNo', 'cfEng', 'cfBirth', 'cfType', 'cfPlace', 'cfHire', 'cfRank', 'cfAppoint', 'cfNote'].forEach(id => cf(id).addEventListener('input', () => { careerDirty = true; }));
+cf('careerAddBtn').addEventListener('click', () => { if (!cf('careerEditor').hidden && !cfClose()) return; cfOpen(null); });
+cf('careerEditorClose').addEventListener('click', cfClose);
+cf('cfAddCareer').addEventListener('click', () => { if (cf('cfCareers').children.length >= 30) { cf('cfStatus').textContent = '타사 경력은 30개까지 입력할 수 있어요.'; cf('cfStatus').className = 'status err'; return; } const r = cfCareerRow(); cf('cfCareers').appendChild(r); careerDirty = true; r.querySelector('.cc-company').focus(); cfPreview(); });
+cf('cfSave').addEventListener('click', async () => {
+  const body = { name: cf('cfName').value, empNo: cf('cfEmpNo').value, engName: cf('cfEng').value, birthDate: cf('cfBirth').value, employmentType: cf('cfType').value, workplace: cf('cfPlace').value, hireDate: cf('cfHire').value, rank: cf('cfRank').value, appointDate: cf('cfAppoint').value, note: cf('cfNote').value, careers: cfCollectCareers().filter(c => c.company || c.months) };
+  cf('cfSave').disabled = true;
+  try {
+    const res = await fetch(careerEditId ? '/api/career/employees/' + encodeURIComponent(careerEditId) : '/api/career/employees', { method: careerEditId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await readJsonOrNull(res); if (!j) throw new Error('서버가 응답하지 못했어요.'); if (!res.ok) throw new Error(j.error || '저장하지 못했어요.');
+    careerDirty = false; cf('careerEditor').hidden = true; careerEditId = ''; await careerLoad(); careerSay(`${j.employee.name} 님을 저장했어요.`, 'ok');
+  } catch (err) { cf('cfStatus').textContent = err.message || '저장 중 오류가 발생했어요.'; cf('cfStatus').className = 'status err'; }
+  finally { cf('cfSave').disabled = false; }
+});
+careerEls.body.addEventListener('click', async e => {
+  const tr = e.target.closest('tr[data-id]'); if (!tr || !careerData) return; const emp = careerData.employees.find(x => x.id === tr.dataset.id); if (!emp) return;
+  if (e.target.closest('.career-edit')) { if (!cf('careerEditor').hidden && !cfClose()) return; cfOpen(emp); return; }
+  if (e.target.closest('.career-del')) {
+    // 퇴사자 삭제: 되돌릴 수 없어서 이름을 직접 입력해야 지워요(서버도 한 번 더 확인해요)
+    const typed = prompt(`${emp.name} 님을 삭제할까요?\n퇴사자 정보가 완전히 지워지고 되돌릴 수 없어요.\n\n삭제하려면 직원 이름을 그대로 입력하세요.`);
+    if (typed === null) return;
+    if (typed.trim() !== emp.name) { careerSay('입력한 이름이 달라서 삭제하지 않았어요.', 'err'); return; }
+    try {
+      const res = await fetch('/api/career/employees/' + encodeURIComponent(emp.id), { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmName: typed.trim() }) });
+      const j = await readJsonOrNull(res); if (!j) throw new Error('서버가 응답하지 못했어요.'); if (!res.ok) throw new Error(j.error || '삭제하지 못했어요.');
+      await careerLoad(); careerSay(`${emp.name} 님을 삭제했어요. (남은 직원 ${j.remaining}명)`, 'ok');
+    } catch (err) { careerSay(err.message || '삭제 중 오류가 발생했어요.', 'err'); }
+  }
+});
+// ---- 승진 기준 ----
+function careerRulesFill() {
+  if (!careerData) return; const r = careerData.rules;
+  document.getElementById('crTenure').checked = !!r.requireTenure; document.getElementById('crHigh').value = r.highRate; document.getElementById('crLow').value = r.lowRate;
+  const used = new Set(careerData.employees.map(e => e.rank));
+  document.getElementById('crRanks').innerHTML = r.ranks.map((x, i) => `<tr data-i="${i}"><td><input class="cr-rank" maxlength="20" value="${escapeHtml(x.rank)}" ${used.has(x.rank) ? 'title="직원이 쓰는 직급이라 이름을 바꾸거나 지울 수 없어요" readonly' : ''} /></td><td><input class="cr-next" type="number" min="0" max="60" step="0.5" value="${x.nextYears ?? ''}" placeholder="없음" /></td><td><input class="cr-min" type="number" min="0" max="60" step="0.5" value="${x.minTenure ?? ''}" placeholder="없음" /></td><td><input class="cr-note" maxlength="60" value="${escapeHtml(x.note || '')}" /></td></tr>`).join('');
+}
+async function careerRulesSave(body, okMsg) {
+  const st = document.getElementById('crStatus');
+  try {
+    const res = await fetch('/api/career/rules', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await readJsonOrNull(res); if (!j) throw new Error('서버가 응답하지 못했어요.'); if (!res.ok) throw new Error(j.error || '저장하지 못했어요.');
+    await careerLoad(); st.textContent = okMsg; st.className = 'status ok';
+  } catch (err) { st.textContent = err.message || '저장 중 오류가 발생했어요.'; st.className = 'status err'; }
+}
+document.getElementById('crSave').addEventListener('click', () => {
+  const ranks = [...document.querySelectorAll('#crRanks tr')].map(tr => ({ rank: tr.querySelector('.cr-rank').value, nextYears: tr.querySelector('.cr-next').value, minTenure: tr.querySelector('.cr-min').value, note: tr.querySelector('.cr-note').value }));
+  careerRulesSave({ requireTenure: document.getElementById('crTenure').checked, highRate: Number(document.getElementById('crHigh').value), lowRate: Number(document.getElementById('crLow').value), ranks }, '승진 기준을 저장했어요. 직원 계산에 바로 반영됐어요.');
+});
+document.getElementById('crReset').addEventListener('click', async () => {
+  if (!confirm('승진 기준과 인정률을 엑셀의 처음 값으로 되돌릴까요?\n직원 정보는 바뀌지 않아요.')) return;
+  try { const d = await (await fetch('/api/career/rules')).json(); await careerRulesSave({ requireTenure: d.defaults.requireTenure, highRate: d.defaults.highRate, lowRate: d.defaults.lowRate, ranks: d.defaults.ranks }, '엑셀의 처음 값으로 되돌렸어요.'); } catch { document.getElementById('crStatus').textContent = '되돌리지 못했어요.'; document.getElementById('crStatus').className = 'status err'; }
+});
+// ---- 직원 파일 가져오기 ----
+document.getElementById('careerImportFile').addEventListener('change', async e => {
+  const out = document.getElementById('careerImportResult'); const r = await readJsonFile(e.target, 3 * 1024 * 1024); if (!r.data && !r.error) return;
+  out.hidden = false; const say = (t, c) => { out.innerHTML = `<li class="${c || ''}">${escapeHtml(t)}</li>`; };
+  if (r.error) { say(r.error, 'err'); return; }
+  const employees = Array.isArray(r.data) ? r.data : (r.data && r.data.employees);
+  if (!Array.isArray(employees)) { say('직원 목록(employees)이 없어요. 이 앱에서 쓰는 직원 파일인지 확인해주세요.', 'err'); return; }
+  if (!confirm(`파일의 직원 ${employees.length}명을 등록할까요?\n같은 사번이 있으면 건너뛰어요. 직원 개인정보가 들어 있는 파일이에요.`)) { out.hidden = true; return; }
+  say('가져오는 중...');
+  try {
+    const res = await fetch('/api/career/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employees }) });
+    const j = await readJsonOrNull(res); if (!j) throw new Error('서버가 응답하지 못했어요.'); if (!res.ok) throw new Error(j.error || '가져오지 못했어요.');
+    out.innerHTML = `<li class="ok"><strong>${j.created}명 등록, ${j.skipped}명 건너뜀, ${j.failed}명 실패</strong></li>` + j.results.filter(x => x.result !== 'created').map(x => `<li class="${x.result === 'skipped' ? '' : 'err'}">${escapeHtml(x.name || '(이름 없음)')} — ${escapeHtml(x.error || '')}</li>`).join('') + '<li class="manage-hint">가져온 뒤에는 파일을 지워주세요(생년월일 등 개인정보가 들어 있어요).</li>';
+    await careerLoad();
+  } catch (err) { say(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
+});
+window.addEventListener('beforeunload', e => { if (careerDirty) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- 양식 관리 ----------
 function renderTemplateCard(tpl, container) {
@@ -4403,7 +4555,7 @@ function batchRender() {
   batchBody.innerHTML = batchSorted().map((row, idx) => {
     const r = row.result;
     const cand = (r && r.candidate) || {};
-    const name = r ? (cand.name || '(이름을 못 읽었어요)') : row.file.name;
+    const name = r ? (cand.name || '(이름을 못 읽었어요)') : (row.file ? row.file.name : '(가져온 결과)');
     let cells;
     if (row.state === 'ok') {
       const c = batchCounts(r);
@@ -4416,7 +4568,7 @@ function batchRender() {
     const btns = row.state === 'ok'
       ? pick + `<button type="button" class="link-btn batch-detail-btn">${row.open ? '접기' : '점수표'}</button> ` + (row.reg && row.reg.id ? ((canEdit('send') ? '<button type="button" class="add-btn batch-sms-btn">📨 면접 문자</button> ' : '') + (canEdit('schedule') ? '<button type="button" class="link-btn batch-sch-btn">📅 일정 등록</button> ' : '') + (row.reg.url ? `<a class="link-btn" href="${escapeHtml(row.reg.url)}" target="_blank" rel="noopener noreferrer">노션에서 열기</a>` : '')) : '<button type="button" class="add-btn batch-reg-btn">서류 합격 확정</button>')
       : (row.state === 'err' ? '<button type="button" class="link-btn batch-retry-btn">다시 평가</button>' : '') + (row.state === 'wait' || row.state === 'err' ? ' <button type="button" class="link-btn batch-remove-btn">빼기</button>' : '');
-    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일"><strong>${escapeHtml(name)}</strong>${reg}<span class="ap-sub">${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
+    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일"><strong>${escapeHtml(name)}</strong>${reg}<span class="ap-sub">${row.file ? `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}` : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
     return main + (row.open && row.state === 'ok' ? batchDetailHtml(row) : '');
   }).join('');
   batchBody.querySelectorAll('tr.batch-detail').forEach(async d => {
@@ -4502,6 +4654,53 @@ async function batchPrepareRegister(tr, row) {
   const ch = tr.querySelector('.br-channel'); ch.innerHTML = optionsHtml(o.channels || [], '(선택 안 함)'); ch.value = (o.channels || []).includes('이메일') ? '이메일' : '';
   const stt = tr.querySelector('.br-status'); stt.innerHTML = optionsHtml(o.statuses || []); stt.value = (o.statuses || []).includes('서류합격') ? '서류합격' : (o.statuses || [''])[0];
 }
+// ---------- 파일로 공고·채점 결과 가져오기 ----------
+async function readJsonFile(input, maxBytes) {
+  const f = input.files && input.files[0]; input.value = '';
+  if (!f) return { error: '' };
+  if (f.size > maxBytes) return { error: `파일이 너무 커요(${Math.round(maxBytes / 1024)}KB 이하).` };
+  if (!/\.json$/i.test(f.name) && f.type !== 'application/json') return { error: 'JSON 파일(.json)만 가져올 수 있어요.' };
+  try { return { data: JSON.parse((await f.text()).replace(/^\uFEFF/, '')), name: f.name }; } catch { return { error: '파일을 읽지 못했어요. 이 앱에서 쓰는 JSON 파일이 맞는지 확인해주세요.' }; }
+}
+document.getElementById('postImportFile').addEventListener('change', async e => {
+  const out = document.getElementById('postImportResult');
+  const r = await readJsonFile(e.target, 1024 * 1024); if (!r.data && !r.error) return;
+  out.hidden = false; out.innerHTML = '';
+  const say = (t, cls) => { out.innerHTML = `<li class="${cls || ''}">${escapeHtml(t)}</li>`; };
+  if (r.error) { say(r.error, 'err'); return; }
+  const postings = Array.isArray(r.data) ? r.data : (r.data && r.data.postings);
+  if (!Array.isArray(postings)) { say('공고 목록(postings)이 없어요. 이 앱에서 쓰는 공고 파일인지 확인해주세요.', 'err'); return; }
+  if (!confirm(`파일의 공고 ${postings.length}개를 저장할까요?\n같은 팀·포지션이 이미 있으면 건너뛰어요.`)) { out.hidden = true; return; }
+  say('가져오는 중...');
+  try {
+    const res = await fetch('/api/postings/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postings }) });
+    const j = await readJsonOrNull(res);
+    if (!j) throw new Error('서버가 응답하지 못했어요.');
+    if (!res.ok) throw new Error(j.error || '가져오지 못했어요.');
+    out.innerHTML = `<li class="ok"><strong>${j.created}개 저장, ${j.skipped}개 건너뜀, ${j.failed}개 실패</strong></li>` + j.results.map(x => `<li class="${x.result === 'created' ? 'ok' : (x.result === 'skipped' ? '' : 'err')}">${escapeHtml(x.label)} — ${x.result === 'created' ? `저장했어요 (${x.status === 'confirmed' ? '확정' : '작성 중'}${x.check && (x.check.error || x.check.warn) ? ` · 공고 점검: 수정 필요 ${x.check.error || 0}건, 확인 필요 ${x.check.warn || 0}건` : ''})` : escapeHtml(x.error || '')}</li>`).join('');
+    await loadPostings();
+  } catch (err) { say(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
+});
+document.getElementById('resultImportFile').addEventListener('change', async e => {
+  const r = await readJsonFile(e.target, 3 * 1024 * 1024); if (!r.data && !r.error) return;
+  if (r.error) { setBatchStatus(r.error, 'err'); return; }
+  if (!evalPositionSelect.value) { setBatchStatus('평가할 공고를 먼저 선택해주세요. (위 "평가할 공고"에서 고르세요)', 'err'); return; }
+  const candidates = Array.isArray(r.data) ? r.data : (r.data && r.data.candidates);
+  if (!Array.isArray(candidates)) { setBatchStatus('채점 결과 목록(candidates)이 없어요. 이 앱에서 쓰는 채점 결과 파일인지 확인해주세요.', 'err'); return; }
+  if (batchRows.length + candidates.length > 80) { setBatchStatus('점수 표가 너무 길어져요. "목록 비우기" 후 다시 가져와주세요.', 'err'); return; }
+  setBatchStatus('채점 결과를 가져오는 중...');
+  try {
+    const res = await fetch('/api/resume/import-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionId: evalPositionSelect.value, profile: r.data.profile || '', candidates }) });
+    const j = await readJsonOrNull(res);
+    if (!j) throw new Error('서버가 응답하지 못했어요.');
+    if (!res.ok) throw new Error(j.error || '가져오지 못했어요.');
+    const failed = [];
+    j.results.forEach(x => { if (x.ok) batchRows.push({ id: ++batchSeq, file: null, state: 'ok', result: x.result, error: '', positionId: evalPositionSelect.value, imported: true, open: false }); else failed.push(`${x.name || '(이름 없음)'}: ${x.error}`); });
+    batchRender(); batchInfoRefresh(); batchTable.hidden = !batchRows.length;
+    setBatchStatus(`채점 결과 ${j.imported}명을 점수 표에 가져왔어요${j.failed ? `, ${j.failed}명은 가져오지 못했어요 (${failed.slice(0, 3).join(' / ')}${failed.length > 3 ? ' 외' : ''})` : ''}. 합격시킬 사람을 "선정"해서 노션에 기록하세요.`, j.failed ? 'err' : 'ok');
+  } catch (err) { setBatchStatus(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
+});
+
 // ---------- 서류 합격 선정 → 한 번에 기록 ----------
 // 점수를 보고 "선정"에 체크한 사람만 모아 노션에 서류 합격으로 기록해요. 이름·연락처는 이력서에서 읽은 값을 쓰고,
 // 같은 사람이 노션에 있으면 건너뛰어요(강제 등록은 줄별 "서류 합격 확정"에서만 할 수 있어요). 한 명이 실패해도 나머지는 계속해요.
@@ -4552,6 +4751,7 @@ async function batchRecordOne(row) {
   if (!res.ok) return { ok: false, msg: data.error || '등록하지 못했어요.' };
   row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone, team, job, status: '서류합격', interview1: '', interview2: '', smsStatus: '' };
   let pdfMsg = '';
+  if (!row.file) return { ok: true, msg: '노션에 서류 합격으로 기록했어요 (가져온 결과라 이력서 PDF는 붙이지 않았어요).' };
   try {   // 이력서 PDF도 붙여요(실패해도 카드는 이미 만들어졌어요)
     const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file });
     const ad = await readJsonOrNull(ar); if (!ar.ok) throw new Error((ad && ad.error) || '첨부 실패');
@@ -4610,6 +4810,7 @@ async function batchRegister(row, tr, force) {
     if (!res.ok) throw new Error(data.error || '등록 실패');
     row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone: tr.querySelector('.br-phone').value.trim(), team, job: jobFromPosition(r.position.name, r.position.brand), status: tr.querySelector('.br-status').value, interview1: '', interview2: '', smsStatus: '' };
     batchRender();
+    if (!row.file) { setBatchStatus(`${name} 님을 서류 합격으로 확정해 노션에 등록했어요 (가져온 결과라 이력서 PDF는 붙이지 않았어요). 이어서 줄의 "📨 면접 문자"로 면접 문자를 보내세요.`, 'ok'); return; }
     // 이력서 PDF도 붙임 (실패해도 카드는 이미 만들어졌으니 안내만)
     try {
       const ar = await fetch(`/api/notion/attach-resume?pageId=${encodeURIComponent(data.id)}&filename=${encodeURIComponent(name + '_이력서.pdf')}`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: row.file });
