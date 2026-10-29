@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-18';
+const APP_VERSION = '2026.10.21-19';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -697,27 +697,38 @@ function careerFillFilters() {
   document.getElementById('cfRank').innerHTML = ranks.map(r => `<option>${escapeHtml(r)}</option>`).join('');
   document.getElementById('cfPlaceList').innerHTML = places.map(p => `<option value="${escapeHtml(p)}">`).join('');
 }
+const careerOpen = new Set();   // "자세히"를 열어 둔 직원
+const careerDash = v => (v === null || v === undefined || v === '' ? '-' : escapeHtml(String(v)));
+// 엑셀의 나머지 열을 엑셀과 같은 이름으로 보여줘요(평소에는 숨겨져 있고 "자세히"를 누르면 열려요)
+function careerDetailHtml(e) {
+  const c = e.calc;
+  const rows = [['영어이름', e.engName], ['생년월일', e.birthDate], ['고용형태', e.employmentType], ['현 직급 발령일', e.appointDate || '입사일과 같음'], ['타사 경력-높음(개월)', c.highMonths], ['타사 경력-낮음(개월)', c.lowMonths], ['타사 총경력(개월)', c.careerMonths], ['인정 타사 경력(개월)', c.recognizedMonths], ['입사 시 인정 직급', c.entryRank], ['당사 근속기간(년)', c.tenureYears], ['비고', e.note]];
+  const list = (e.careers || []).length ? `<div class="career-detail-list"><strong>타사 경력</strong>${e.careers.map(x => `<span>${escapeHtml(x.company || '(회사 이름 없음)')} · ${x.months}개월 · 연관성 ${x.relevance === 'high' ? '높음' : '낮음'}${x.note ? ' · ' + escapeHtml(x.note) : ''}</span>`).join('')}</div>` : '';
+  return `<div class="career-detail-grid">${rows.map(([k, v]) => `<div><span class="ap-sub">${escapeHtml(k)}</span>${careerDash(v)}</div>`).join('')}</div>${list}<p class="manage-hint" style="margin:6px 0 0">판정 근거: ${escapeHtml(c.reason)}</p>`;
+}
 function careerRender() {
   if (!careerData) return;
   const q = document.getElementById('careerSearch').value.trim().toLowerCase(), rank = document.getElementById('careerRankFilter').value, place = document.getElementById('careerPlaceFilter').value, resf = document.getElementById('careerResultFilter').value, sort = document.getElementById('careerSort').value;
   const order = careerData.rules.ranks.map(r => r.rank);
   let list = careerData.employees.filter(e => (!q || e.name.toLowerCase().includes(q) || String(e.empNo).toLowerCase().includes(q) || String(e.engName).toLowerCase().includes(q)) && (!rank || e.rank === rank) && (!place || e.workplace === place) && (!resf || e.calc.result === resf));
-  list.sort((x, y) => sort === 'name' ? x.name.localeCompare(y.name, 'ko') : sort === 'hire' ? String(x.hireDate).localeCompare(String(y.hireDate)) : sort === 'rank' ? (order.indexOf(y.rank) - order.indexOf(x.rank)) || (y.calc.totalYears - x.calc.totalYears) : (y.calc.totalYears ?? -1) - (x.calc.totalYears ?? -1));
+  if (sort !== 'order') list.sort((x, y) => sort === 'name' ? x.name.localeCompare(y.name, 'ko') : sort === 'hire' ? String(x.hireDate).localeCompare(String(y.hireDate)) : sort === 'rank' ? (order.indexOf(y.rank) - order.indexOf(x.rank)) || (y.calc.totalYears - x.calc.totalYears) : (y.calc.totalYears ?? -1) - (x.calc.totalYears ?? -1));
   const sm = careerData.summary, by = sm.byResult || {};
-  careerEls.summary.innerHTML = [['', `전체 ${sm.total}명`], ['승진 검토 대상', `승진 검토 대상 ${by['승진 검토 대상'] || 0}`], ['근속 부족', `근속 부족 ${by['근속 부족'] || 0}`], ['별도 심사', `별도 심사 ${by['별도 심사'] || 0}`], ['기준 미달', `기준 미달 ${by['기준 미달'] || 0}`]].map(([k, t]) => `<button type="button" class="career-chip ${resf === k ? 'on' : ''}" data-result="${escapeHtml(k)}">${escapeHtml(t)}</button>`).join('') + `<span class="manage-hint" style="margin:0">기준일 ${escapeHtml(careerData.today)}${careerData.rules.requireTenure ? ' · 누적 경력과 현 직급 근속을 모두 봐요' : ' · 누적 경력만 봐요'}</span>`;
+  // 요약 칩: 사람이 있는 판정만 보여줘요(개수가 0인 칸은 숨겨요)
+  careerEls.summary.innerHTML = [['', `전체 ${sm.total}명`], ...['승진 검토 대상', '근속 부족', '기준 미달', '별도 심사', '정보 확인 필요', '직급 확인'].filter(k => by[k]).map(k => [k, `${k} ${by[k]}`])].map(([k, t]) => `<button type="button" class="career-chip ${resf === k ? 'on' : ''}" data-result="${escapeHtml(k)}">${escapeHtml(t)}</button>`).join('');
   careerEls.body.innerHTML = list.map(e => {
-    const c = e.calc; const cls = CAREER_RESULT_CLASS[c.result] || '';
+    const c = e.calc; const cls = CAREER_RESULT_CLASS[c.result] || ''; const open = careerOpen.has(e.id);
     return `<tr data-id="${escapeHtml(e.id)}">
-      <td data-label="직원"><strong>${escapeHtml(e.name)}</strong>${e.engName ? ` <span class="ap-sub">(${escapeHtml(e.engName)})</span>` : ''}<span class="ap-sub">${e.empNo ? '사번 ' + escapeHtml(e.empNo) + ' · ' : ''}${escapeHtml(e.employmentType || '')}</span></td>
-      <td data-label="근무지">${escapeHtml(e.workplace || '-')}</td>
-      <td data-label="입사일">${escapeHtml(e.hireDate || '-')}<span class="ap-sub">당사 ${c.tenureYears ?? '-'}년</span></td>
-      <td data-label="직급"><strong>${escapeHtml(e.rank)}</strong><span class="ap-sub">${e.appointDate ? '발령 ' + escapeHtml(e.appointDate) : '입사와 같음'}</span></td>
-      <td data-label="인정 타사 경력">${c.recognizedMonths ? `${c.recognizedMonths}개월 <span class="ap-sub">높음 ${c.highMonths} · 낮음 ${c.lowMonths}${c.entryRank ? ' · 입사 시 ' + escapeHtml(c.entryRank) : ''}</span>` : '<span class="ap-sub">없음</span>'}</td>
-      <td data-label="누적 경력"><strong>${c.totalYears ?? '-'}</strong>년${c.nextYears != null ? `<span class="ap-sub">기준 ${c.nextYears}년</span>` : ''}</td>
-      <td data-label="현 직급 근속">${c.rankTenureYears ?? '-'}년${c.minTenure != null ? `<span class="ap-sub">최소 ${c.minTenure}년</span>` : ''}</td>
-      <td data-label="승진 판정"><span class="career-result ${cls}" title="${escapeHtml(c.reason)}">${escapeHtml(c.result)}</span><span class="ap-sub career-reason">${escapeHtml(c.reason)}</span></td>
-      <td class="posting-row-actions"><button type="button" class="career-edit" data-edit="career">수정</button><button type="button" class="career-del" data-edit="career">삭제</button></td>
-    </tr>`;
+      <td data-label="직원명"><strong>${escapeHtml(e.name)}</strong></td>
+      <td data-label="사번">${careerDash(e.empNo)}</td>
+      <td data-label="근무지">${careerDash(e.workplace)}</td>
+      <td data-label="입사일">${careerDash(e.hireDate)}</td>
+      <td data-label="현재 직급"><strong>${escapeHtml(e.rank)}</strong></td>
+      <td data-label="승진 대상 직급" class="career-target-cell">${c.nextRank ? `<span class="career-arrow">→</span> <strong class="${c.result === '승진 검토 대상' ? 'career-target' : ''}">${escapeHtml(c.nextRank)}</strong>` : '<span class="ap-sub">-</span>'}</td>
+      <td data-label="누적 경력(년)"><strong>${careerDash(c.totalYears)}</strong>${c.nextYears != null ? `<span class="ap-sub">기준 ${c.nextYears}년</span>` : ''}</td>
+      <td data-label="현 직급 근속(년)">${careerDash(c.rankTenureYears)}${c.minTenure != null ? `<span class="ap-sub">최소 ${c.minTenure}년</span>` : ''}</td>
+      <td data-label="승진 검토 결과"><span class="career-result ${cls}" title="${escapeHtml(c.reason)}">${escapeHtml(c.result)}</span></td>
+      <td class="posting-row-actions"><button type="button" class="career-more" aria-expanded="${open}">${open ? '접기' : '자세히'}</button><button type="button" class="career-edit" data-edit="career">수정</button><button type="button" class="career-del" data-edit="career">삭제</button></td>
+    </tr>${open ? `<tr class="career-detail-row" data-for="${escapeHtml(e.id)}"><td colspan="10">${careerDetailHtml(e)}</td></tr>` : ''}`;
   }).join('');
   careerEls.empty.hidden = !!list.length || !careerData.employees.length;
 }
@@ -767,6 +778,7 @@ cf('cfSave').addEventListener('click', async () => {
 });
 careerEls.body.addEventListener('click', async e => {
   const tr = e.target.closest('tr[data-id]'); if (!tr || !careerData) return; const emp = careerData.employees.find(x => x.id === tr.dataset.id); if (!emp) return;
+  if (e.target.closest('.career-more')) { careerOpen.has(emp.id) ? careerOpen.delete(emp.id) : careerOpen.add(emp.id); careerRender(); return; }
   if (e.target.closest('.career-edit')) { if (!cf('careerEditor').hidden && !cfClose()) return; cfOpen(emp); return; }
   if (e.target.closest('.career-del')) {
     // 퇴사자 삭제: 되돌릴 수 없어서 이름을 직접 입력해야 지워요(서버도 한 번 더 확인해요)
@@ -784,8 +796,9 @@ careerEls.body.addEventListener('click', async e => {
 function careerRulesFill() {
   if (!careerData) return; const r = careerData.rules;
   document.getElementById('crTenure').checked = !!r.requireTenure; document.getElementById('crHigh').value = r.highRate; document.getElementById('crLow').value = r.lowRate;
-  const used = new Set(careerData.employees.map(e => e.rank));
-  document.getElementById('crRanks').innerHTML = r.ranks.map((x, i) => `<tr data-i="${i}"><td><input class="cr-rank" maxlength="20" value="${escapeHtml(x.rank)}" ${used.has(x.rank) ? 'title="직원이 쓰는 직급이라 이름을 바꾸거나 지울 수 없어요" readonly' : ''} /></td><td><input class="cr-next" type="number" min="0" max="60" step="0.5" value="${x.nextYears ?? ''}" placeholder="없음" /></td><td><input class="cr-min" type="number" min="0" max="60" step="0.5" value="${x.minTenure ?? ''}" placeholder="없음" /></td><td><input class="cr-note" maxlength="60" value="${escapeHtml(x.note || '')}" /></td></tr>`).join('');
+  document.getElementById('crModeNote').textContent = r.requireTenure ? '· 지금: 누적 경력 + 현 직급 최소 근속' : '· 지금: 누적 경력만 (엑셀과 같아요)';
+  const used = new Set(careerData.employees.map(e => e.rank)); const names = r.ranks.map(x => x.rank);
+  document.getElementById('crRanks').innerHTML = r.ranks.map((x, i) => `<tr data-i="${i}"><td><input class="cr-rank" maxlength="20" value="${escapeHtml(x.rank)}" ${used.has(x.rank) ? 'title="직원이 쓰는 직급이라 이름을 바꾸거나 지울 수 없어요" readonly' : ''} /></td><td><select class="cr-nextrank" aria-label="승진 대상 직급"><option value="">없음</option>${names.filter(n => n !== x.rank).map(n => `<option${n === x.nextRank ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></td><td><input class="cr-next" type="number" min="0" max="60" step="0.5" value="${x.nextYears ?? ''}" placeholder="없음" /></td><td><input class="cr-min" type="number" min="0" max="60" step="0.5" value="${x.minTenure ?? ''}" placeholder="없음" /></td><td><input class="cr-note" maxlength="60" value="${escapeHtml(x.note || '')}" /></td></tr>`).join('');
 }
 async function careerRulesSave(body, okMsg) {
   const st = document.getElementById('crStatus');
@@ -796,7 +809,7 @@ async function careerRulesSave(body, okMsg) {
   } catch (err) { st.textContent = err.message || '저장 중 오류가 발생했어요.'; st.className = 'status err'; }
 }
 document.getElementById('crSave').addEventListener('click', () => {
-  const ranks = [...document.querySelectorAll('#crRanks tr')].map(tr => ({ rank: tr.querySelector('.cr-rank').value, nextYears: tr.querySelector('.cr-next').value, minTenure: tr.querySelector('.cr-min').value, note: tr.querySelector('.cr-note').value }));
+  const ranks = [...document.querySelectorAll('#crRanks tr')].map(tr => ({ rank: tr.querySelector('.cr-rank').value, nextRank: tr.querySelector('.cr-nextrank').value, nextYears: tr.querySelector('.cr-next').value, minTenure: tr.querySelector('.cr-min').value, note: tr.querySelector('.cr-note').value }));
   careerRulesSave({ requireTenure: document.getElementById('crTenure').checked, highRate: Number(document.getElementById('crHigh').value), lowRate: Number(document.getElementById('crLow').value), ranks }, '승진 기준을 저장했어요. 직원 계산에 바로 반영됐어요.');
 });
 document.getElementById('crReset').addEventListener('click', async () => {
@@ -1827,7 +1840,8 @@ function renderEvalOptions() {
   const keep = evalPositionSelect.value;
   const confirmed = postingsAll.filter(p => p.status === 'confirmed');
   if (!confirmed.length) {
-    evalPositionSelect.innerHTML = '<option value="">확정된 공고가 없어요 — "공고 만들기" 탭에서 공고를 확정해주세요</option>';
+    evalPositionSelect.innerHTML = '<option value="">확정된 공고가 없어요 — 공고를 확정해야 여기에 나와요</option>';
+    renderEvalDraftNote();
     return;
   }
   const teamRank = t => { const i = postTeams.indexOf(t); return i < 0 ? 999 : i; };
@@ -1836,6 +1850,17 @@ function renderEvalOptions() {
     `<optgroup label="${escapeHtml(t)}">${confirmed.filter(p => p.team === t)
       .map(p => `<option value="${escapeHtml(p.id)}">${fmtDate(p.createdAt)} · ${escapeHtml(p.position)}${p.brand ? ` [${escapeHtml(p.brand)}]` : ''}</option>`).join('')}</optgroup>`).join('');
   if (confirmed.some(p => p.id === keep)) evalPositionSelect.value = keep;
+  renderEvalDraftNote();
+}
+// 확정하지 않은 공고는 평가 목록에 안 나와요. 어느 공고가 왜 안 보이는지와 확정하러 가는 길을 알려줘요.
+function renderEvalDraftNote() {
+  const box = document.getElementById('evalDraftNote'); if (!box) return;
+  const drafts = postingsAll.filter(p => p.status !== 'confirmed');
+  if (!drafts.length) { box.hidden = true; box.innerHTML = ''; return; }
+  const names = drafts.slice(0, 4).map(p => escapeHtml(p.position + (p.brand ? ` [${p.brand}]` : ''))).join(', ') + (drafts.length > 4 ? ` 외 ${drafts.length - 4}개` : '');
+  box.hidden = false;
+  box.innerHTML = `<strong>확정하지 않은 공고 ${drafts.length}개</strong>는 여기에 안 나와요: ${names}<br><span class="manage-hint" style="margin:0">공고를 <strong>확정</strong>해야 이력서 평가에 쓸 수 있어요.</span> <button type="button" class="link-btn eval-go-posting">공고 만들기로 이동</button>`;
+  box.querySelector('.eval-go-posting').addEventListener('click', () => showTab('posting'));
 }
 
 // --- 공고 조회 목록 (생성일순 · 팀별) ---
@@ -1868,7 +1893,7 @@ function renderPostingList() {
       <td data-label="상태"><span class="notion-tag state-${state}${state === 'confirmed' || state === 'open' ? ' tag-ok' : ''}">${STATE_LABEL[state]}</span>${p.confirmedAt ? `<div class="manage-hint" style="margin:2px 0 0">확정 ${fmtDate(p.confirmedAt)}</div>` : ''}${p.closedAt ? `<div class="manage-hint" style="margin:2px 0 0">마감 처리 ${escapeHtml(p.closedAt)}</div>` : (state === 'closed' && p.applyEnd ? `<div class="manage-hint" style="margin:2px 0 0">접수 마감 ${escapeHtml(p.applyEnd)}</div>` : '')}${chs ? `<div class="manage-hint pp-chs" style="margin:2px 0 0">게시: ${chs}</div>` : ''}${sTxt ? `<div class="manage-hint pp-stats" style="margin:2px 0 0">${escapeHtml(sTxt)}</div>` : ''}</td>
       <td class="posting-row-actions">
         <button type="button" data-act="view" data-id="${escapeHtml(p.id)}">보기</button>
-        ${p.status === 'confirmed' ? `<button type="button" data-act="use" data-edit="resume" data-id="${escapeHtml(p.id)}">평가에 사용</button>` : ''}
+        ${p.status === 'confirmed' ? `<button type="button" data-act="use" data-edit="resume" data-id="${escapeHtml(p.id)}">평가에 사용</button>` : `<button type="button" data-act="confirmnow" data-edit="resume" data-id="${escapeHtml(p.id)}" title="확정해야 이력서 평가의 평가할 공고에 나와요">확정</button>`}
         ${p.status === 'confirmed' ? `<button type="button" data-act="publish" data-edit="resume" data-id="${escapeHtml(p.id)}">게시·마감</button>` : ''}
         <button type="button" data-act="edit" data-edit="resume" data-id="${escapeHtml(p.id)}">수정</button>
         <button type="button" data-act="del" data-edit="resume" data-id="${escapeHtml(p.id)}">삭제</button>
@@ -2611,6 +2636,12 @@ document.getElementById('saraminBox').addEventListener('toggle', e => { if (e.ta
 // 맞춤 질문은 버튼을 눌렀을 때만 AI를 불러요(자동으로 비용이 들지 않게). API 없이 쓰려면 요청문을 복사해 Claude 채팅에 붙여넣어요.
 // 공용 패널: 일정 카드(opts.btn으로 열고 이름·연락처로 지원자 찾기)와 면접 관리 탭(opts.preset으로 지원자를 바로 지정)이 같은 코드를 써요.
 // 마크업은 <template id="iqPanelTpl">에서 복제해요. 맞춤 질문은 버튼을 눌렀을 때만 AI를 불러요(자동으로 비용이 들지 않게).
+// 평가 사유는 노션 답변 칸 안에 "답변 ⏎⏎[평가 사유] 사유"로 함께 저장돼요(서버와 같은 규칙). 화면은 전송한 값을 "노션의 현재 값"으로 기억할 때 써요.
+const REASON_MARK = '[평가 사유]';
+const joinReason = (answer, reason) => { const a = String(answer ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim(); const r = String(reason ?? '').replace(/\r\n/g, '\n').split(REASON_MARK).join('').trim(); return r ? (a ? `${a}\n\n${REASON_MARK} ${r}` : `${REASON_MARK} ${r}`) : a; };
+// ⭐ 점수의 공통 의미(질문별 기준은 질문 아래의 "확인"과 "좋은 답·주의 신호"를 같이 보세요). 합격·불합격 기준이 아니에요.
+const STAR_SHORT = { 1: '미흡', 2: '약함', 3: '보통', 4: '좋음', 5: '매우 좋음' };   // 점수 선택 목록에 보이는 짧은 말(전체 의미는 마우스를 올리거나 위의 "⭐ 점수는 이렇게 읽어요"에서 봐요)
+const STAR_MEANING = { 1: '답이 거의 없거나 질문과 맞지 않아요', 2: '일부만 답했고 근거(사례·수치·본인 역할)가 약해요', 3: '질문에 맞게 답했고 기본 근거는 있어요', 4: '구체적인 사례와 본인 역할이 분명해요', 5: '수치·본인 기여·재현 가능한 방법까지 구체적이고 인상적이에요' };
 // 요건별 확인 질문을 질문 목록 항목으로: 노션 표에 맞춤 질문처럼 쓰이도록 기준 칸에 어떤 요건인지(필수 R1 + 원문)를 함께 남겨요
 function toReqItem(q) {
   return { question: q.question, criteria: `[${q.kind} ${q.reqId}] ${q.requirement}${q.criteria ? ' — ' + q.criteria : ''}`.slice(0, 280), basis: '', reqId: q.reqId, kind: q.kind, requirement: q.requirement, isReq: true };
@@ -2706,7 +2737,7 @@ function mountInterviewPanel(host, opts) {
     return null;
   }
   const rowKey = q => (q.no ? 'no:' + q.no : 'q:' + String(q.question || '').replace(/\s+/g, ' ').trim());
-  const stateOf = q => { const k = rowKey(q); if (!answers.has(k)) { const ex = existing.get(k) || (q.no ? null : existing.get('q:' + String(q.question || '').replace(/\s+/g, ' ').trim())); answers.set(k, { answer: ex ? ex.answer : '', score: ex ? ex.score : 0, base: ex ? ex.answer : '', fromNotion: !!ex && !!(ex.answer || ex.score) }); } return answers.get(k); };
+  const stateOf = q => { const k = rowKey(q); if (!answers.has(k)) { const ex = existing.get(k) || (q.no ? null : existing.get('q:' + String(q.question || '').replace(/\s+/g, ' ').trim())); answers.set(k, { answer: ex ? ex.answer : '', reason: ex ? (ex.reason || '') : '', score: ex ? ex.score : 0, base: ex ? (ex.raw ?? ex.answer) : '', fromNotion: !!ex && !!(ex.answer || ex.reason || ex.score) }); } return answers.get(k); };
   function group(title, hint, items, checked, kind) {
     if (!items.length) return '';
     return `<div class="iq-group"><strong>${escapeHtml(title)}</strong>${hint ? `<span class="manage-hint" style="margin:0 0 0 6px">${escapeHtml(hint)}</span>` : ''}<ul class="iq-list">` + items.map((q, i) => { const st = stateOf(q); return `
@@ -2715,7 +2746,9 @@ function mountInterviewPanel(host, opts) {
         ${q.isReq ? `<div class="iq-sub">요건: ${escapeHtml(q.requirement)}</div>` : (q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : '')}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : ''}${(q.followUps && q.followUps.length) || (q.goodSigns && q.goodSigns.length) || (q.watchSigns && q.watchSigns.length) ? `<details class="iq-more"><summary>꼬리질문 · 답변 평가 신호</summary>${q.followUps && q.followUps.length ? `<div class="iq-sub"><strong>꼬리질문</strong> ${q.followUps.map(escapeHtml).join(' / ')}</div>` : ''}${q.goodSigns && q.goodSigns.length ? `<div class="iq-sub iq-good"><strong>좋은 답의 신호</strong> ${q.goodSigns.map(escapeHtml).join(' / ')}</div>` : ''}${q.watchSigns && q.watchSigns.length ? `<div class="iq-sub iq-watch"><strong>주의 신호</strong> ${q.watchSigns.map(escapeHtml).join(' / ')}</div>` : ''}<div class="manage-hint" style="margin:2px 0 0">신호는 답을 들으며 관찰하는 참고용이에요. 합격·불합격 기준이 아니에요.</div></details>` : ''}
         <div class="iq-ans"${checked ? '' : ' hidden'}>
           <textarea class="iq-ans-text" rows="2" maxlength="6000" placeholder="면접 답변을 적어요 (노션 채용 문항 표의 '답변'에 들어가요)" aria-label="답변">${escapeHtml(st.answer)}</textarea>
-          <select class="iq-ans-score" aria-label="점수(⭐)"><option value="0">점수 선택</option>${[1,2,3,4,5].map(n => `<option value="${n}"${st.score === n ? ' selected' : ''}>${'⭐'.repeat(n)}</option>`).join('')}</select>
+          <select class="iq-ans-score" aria-label="점수(⭐)"><option value="0">점수 선택</option>${[1,2,3,4,5].map(n => `<option value="${n}"${st.score === n ? ' selected' : ''} title="${escapeHtml(STAR_MEANING[n])}">${'⭐'.repeat(n)} ${STAR_SHORT[n]}</option>`).join('')}</select>
+          <input class="iq-ans-reason" maxlength="1000" placeholder="평가 사유 (선택) — 답에서 관찰한 행동·근거를 적어요. 나이·가족 같은 내용은 쓰지 마세요" aria-label="평가 사유" value="${escapeHtml(st.reason || '')}" />
+          <span class="manage-hint iq-reason-hint" style="margin:0"></span>
         </div></li>`; }).join('') + '</ul></div>';
   }
   // 이번 질문에 쓴 자료와 면접 진행안(시간 배분)을 결과 맨 위에 보여줘요
@@ -2734,11 +2767,15 @@ function mountInterviewPanel(host, opts) {
     const planBox = planInfo && planInfo.timeline ? `<div class="iq-plan"><strong>면접 진행안</strong> <span class="manage-hint" style="margin:0">${escapeHtml(planInfo.stage)} 면접 · ${planInfo.minutes}분 (참고용 시간 배분이에요)</span><ol class="iq-plan-list">${planInfo.timeline.map(r => `<li><span class="iq-plan-min">${r.minutes}분</span> ${escapeHtml(r.label)}</li>`).join('')}</ol></div>` : '';
     return srcBox + planBox;
   }
+  // ⭐ 점수의 공통 의미 안내(접이식). 질문 줄의 점수 선택 힌트와 같은 문구(STAR_MEANING)를 써요
+  function starGuideHtml() {
+    return `<details class="iq-stars"><summary>⭐ 점수는 이렇게 읽어요 (참고)</summary><ul>${[5, 4, 3, 2, 1].map(n => `<li><strong>${'⭐'.repeat(n)}</strong> ${escapeHtml(STAR_MEANING[n])}</li>`).join('')}</ul><p class="manage-hint" style="margin:2px 0 0">질문마다 "확인"(무엇을 보는지)과 "좋은 답·주의 신호"를 같이 보세요. 점수와 사유는 <strong>답에서 관찰한 행동과 근거</strong>로만 적어요(나이·결혼·가족 같은 내용은 안 돼요). 점수는 참고이고 합격·불합격은 사람이 정해요.</p></details>`;
+  }
   function renderResult() {
     if (!data) return;
     resultEl.hidden = false;
     const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
-    resultEl.innerHTML = planHtml() +
+    resultEl.innerHTML = planHtml() + starGuideHtml() +
       group('공고 요건 확인 질문', '공고의 필수·우대 요건마다 하나씩 (면접에서 어떻게 했는지 확인)', reqq, true, 'reqq') +
         group('이력서 맞춤 질문', 'AI가 지원자의 이력서 평가 요약을 근거로 만든 질문', custom, true, 'custom') +
       group('직무 상황 질문', '공고의 업무를 바탕으로 한 상황 질문 (정답보다 판단 근거와 우선순위를 확인)', scens, true, 'scen') +
@@ -2754,7 +2791,10 @@ function mountInterviewPanel(host, opts) {
     resultEl.querySelectorAll('.iq-list li').forEach(li => {
       const grp = li.dataset.kind; const idx = Number(li.dataset.i); const q = listOf(grp)[idx]; if (!q) return;
       li.querySelector('.iq-ans-text').addEventListener('input', e => { stateOf(q).answer = e.target.value; markDirty(true); });
-      li.querySelector('.iq-ans-score').addEventListener('change', e => { stateOf(q).score = Number(e.target.value) || 0; markDirty(true); updateCount(); });
+      const hint = () => { const st = stateOf(q); const h = li.querySelector('.iq-reason-hint'); h.textContent = (st.score && (st.score <= 2 || st.score === 5) && !String(st.reason || '').trim()) ? `⭐${st.score}는 사유를 적어두면 나중에 근거로 좋아요.` : ''; };
+      li.querySelector('.iq-ans-reason').addEventListener('input', e => { stateOf(q).reason = e.target.value; markDirty(true); hint(); });
+      li.querySelector('.iq-ans-score').addEventListener('change', e => { stateOf(q).score = Number(e.target.value) || 0; markDirty(true); updateCount(); hint(); });
+      hint();
     });
     updateCount();
     resultEl.querySelector('.iq-copy-sel').addEventListener('click', copySelected);
@@ -2779,7 +2819,7 @@ function mountInterviewPanel(host, opts) {
     all.forEach(x => { const k = rowKey(x); if (seen.has(k)) return; seen.add(k); const v = stateOf(x).score; if (v) sc.push(v); });
     return sc.length ? { n: sc.length, avg: Math.round(sc.reduce((a, b) => a + b, 0) / sc.length * 10) / 10 } : null;
   }
-  function updateCount() { const q = selected(); const n = q.custom.length + q.required.length + q.suggested.length + q.opening.length; const filled = [...q.custom, ...q.required, ...q.suggested, ...q.opening].filter(x => { const st = stateOf(x); return st.answer.trim() || st.score; }).length; const sm = scoreSummary(); resultEl.querySelector('.iq-count').textContent = `${n}개 선택 · 답변/점수 ${filled}개 작성`; const box = resultEl.querySelector('.iq-score-sum'); if (box) box.textContent = sm ? `면접 점수 평균 ${sm.avg.toFixed(1)} / 5 (점수를 매긴 질문 ${sm.n}개)` : '아직 점수를 매긴 질문이 없어요'; }
+  function updateCount() { const q = selected(); const n = q.custom.length + q.required.length + q.suggested.length + q.opening.length; const filled = [...q.custom, ...q.required, ...q.suggested, ...q.opening].filter(x => { const st = stateOf(x); return st.answer.trim() || String(st.reason || '').trim() || st.score; }).length; const sm = scoreSummary(); resultEl.querySelector('.iq-count').textContent = `${n}개 선택 · 답변/점수 ${filled}개 작성`; const box = resultEl.querySelector('.iq-score-sum'); if (box) box.textContent = sm ? `면접 점수 평균 ${sm.avg.toFixed(1)} / 5 (점수를 매긴 질문 ${sm.n}개)` : '아직 점수를 매긴 질문이 없어요'; }
   async function copySelected() {
     const q = selected(); const lines = [];
     const add = (t, list) => { if (list.length) { lines.push(`[${t}]`); list.forEach((x, i) => { lines.push(`${i + 1}. ${x.type ? `[${x.type}] ` : ''}${x.question}${x.criteria ? ` (확인: ${x.criteria})` : ''}`); if (x.followUps && x.followUps.length) lines.push(`   - 꼬리질문: ${x.followUps.join(' / ')}`); if (x.goodSigns && x.goodSigns.length) lines.push(`   - 좋은 답: ${x.goodSigns.join(' / ')}`); if (x.watchSigns && x.watchSigns.length) lines.push(`   - 주의: ${x.watchSigns.join(' / ')}`); }); lines.push(''); } };
@@ -2806,7 +2846,7 @@ function mountInterviewPanel(host, opts) {
   async function sendAnswers(force) {
     const q = selected(); const kinds = [['opening', '선택'], ['custom', '맞춤'], ['required', '필수'], ['suggested', '선택']];
     const items = [];
-    kinds.forEach(([k, t]) => (q[k] || []).forEach(x => { const st = stateOf(x); if (st.answer.trim() || st.score) items.push({ no: x.no || '', type: t, question: x.question, criteria: x.criteria || '', answer: st.answer, score: st.score, base: st.base }); }));
+    kinds.forEach(([k, t]) => (q[k] || []).forEach(x => { const st = stateOf(x); if (st.answer.trim() || String(st.reason || '').trim() || st.score) items.push({ no: x.no || '', type: t, question: x.question, criteria: x.criteria || '', answer: st.answer, reason: st.reason || '', score: st.score, base: st.base }); }));
     if (!items.length) { setStatus('체크한 질문에 답변이나 점수를 하나 이상 적어주세요.', 'err'); return; }
     if (items.length > 60) { setStatus('한 번에 60개까지 보낼 수 있어요. 나눠서 보내주세요.', 'err'); return; }
     const btn3 = resultEl.querySelector('.iq-send-ans'); btn3.disabled = true; setStatus('노션에 답변을 보내는 중...');
@@ -2818,7 +2858,7 @@ function mountInterviewPanel(host, opts) {
       if (res.status === 409 && j.duplicate) { btn3.disabled = false; if (confirm(`${j.error}\n\n그래도 다시 기록할까요?`)) return sendAnswers(true); setStatus('전송하지 않았어요.', 'err'); return; }
       if (!res.ok || !j.success) throw new Error(j.error || '노션에 전송하지 못했어요.');
       // 보낸 값을 "노션의 현재 값"으로 기억해서 다음 전송에서 충돌로 오해하지 않게 해요
-      items.forEach(it => { const st = answers.get(it.no ? 'no:' + it.no : 'q:' + it.question.replace(/\s+/g, ' ').trim()); if (st) { st.base = it.answer.trim(); st.fromNotion = true; } });
+      items.forEach(it => { const st = answers.get(it.no ? 'no:' + it.no : 'q:' + it.question.replace(/\s+/g, ' ').trim()); if (st) { st.base = joinReason(it.answer, it.reason); st.fromNotion = true; } });
       markDirty(false); renderResult();
       const where = j.target === 'table' ? `노션 「채용 문항」 표에 기록했어요 (수정 ${j.updated} · 추가 ${j.created}${j.skipped ? ` · 변경 없음 ${j.skipped}` : ''})` : `카드 본문의 "면접 답변 기록"에 ${j.count}개를 기록했어요`;
       setStatus(where + '.' + (j.note ? ' ' + j.note : '') + ((j.failed && j.failed.length) ? ` 단, ${j.failed.length}개는 쓰지 못했어요(${j.failed.map(f => f.no || f.question.slice(0, 12)).join(', ')}).` : ''), (j.failed && j.failed.length) ? 'err' : 'ok');
@@ -3067,6 +3107,14 @@ postingBody.addEventListener('click', async e => {
       postingDetail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } else if (btn.dataset.act === 'publish') {
       openPublishEditor(id);
+    } else if (btn.dataset.act === 'confirmnow') {
+      btn.disabled = true;
+      try {
+        let c = { error: 0, warn: 0 };
+        try { const pr = await fetchPosting(id); const ck = await fetch('/api/postings/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jd: pr.jd, applyEnd: pr.applyEnd, career: pr.career, education: pr.education }) }); const cj = await readJsonOrNull(ck); if (cj && cj.count) c = cj.count; } catch { /* 점검을 못 해도 확정은 할 수 있어요 */ }
+        const ok = await confirmPostingNow(id, c.error || 0, c.warn || 0);
+        if (ok) setPostStatus(`"${item.position}" 공고를 확정했어요. 이제 이력서 평가의 "평가할 공고"에 나와요.`, 'ok');
+      } finally { btn.disabled = false; }
     } else if (btn.dataset.act === 'use') {
       showTab('resume');                       // 평가는 이력서 검토 탭에서 해요
       evalPositionSelect.value = id;
@@ -4677,9 +4725,27 @@ document.getElementById('postImportFile').addEventListener('change', async e => 
     const j = await readJsonOrNull(res);
     if (!j) throw new Error('서버가 응답하지 못했어요.');
     if (!res.ok) throw new Error(j.error || '가져오지 못했어요.');
-    out.innerHTML = `<li class="ok"><strong>${j.created}개 저장, ${j.skipped}개 건너뜀, ${j.failed}개 실패</strong></li>` + j.results.map(x => `<li class="${x.result === 'created' ? 'ok' : (x.result === 'skipped' ? '' : 'err')}">${escapeHtml(x.label)} — ${x.result === 'created' ? `저장했어요 (${x.status === 'confirmed' ? '확정' : '작성 중'}${x.check && (x.check.error || x.check.warn) ? ` · 공고 점검: 수정 필요 ${x.check.error || 0}건, 확인 필요 ${x.check.warn || 0}건` : ''})` : escapeHtml(x.error || '')}</li>`).join('');
+    out.innerHTML = `<li class="ok"><strong>${j.created}개 저장, ${j.skipped}개 건너뜀, ${j.failed}개 실패</strong></li>` + (j.results.some(x => x.result === 'created' && x.status !== 'confirmed') ? '<li class="manage-hint">작성 중인 공고는 <strong>확정해야 이력서 평가의 "평가할 공고"에 나와요.</strong> 아래 "지금 확정"을 누르거나, 공고 조회 목록에서 공고를 열어 확정하세요.</li>' : '') + j.results.map(x => `<li class="${x.result === 'created' ? 'ok' : (x.result === 'skipped' ? '' : 'err')}" data-pid="${escapeHtml(x.id || '')}">${escapeHtml(x.label)} — ${x.result === 'created' ? `저장했어요 (${x.status === 'confirmed' ? '확정' : '작성 중'}${x.check && (x.check.error || x.check.warn) ? ` · 공고 점검: 수정 필요 ${x.check.error || 0}건, 확인 필요 ${x.check.warn || 0}건` : ''})${x.status !== 'confirmed' ? ` <button type="button" class="link-btn post-import-confirm" data-pid="${escapeHtml(x.id)}" data-errs="${(x.check && x.check.error) || 0}" data-warns="${(x.check && x.check.warn) || 0}">지금 확정</button>` : ''}` : escapeHtml(x.error || '')}</li>`).join('');
     await loadPostings();
   } catch (err) { say(err.message || '가져오는 중 오류가 발생했어요.', 'err'); }
+});
+// 작성 중 공고를 바로 확정해요(공고 가져오기 결과와 공고 조회 목록에서 같이 써요). 확정하면 이력서 평가의 "평가할 공고"에 나와요.
+// 공고 점검의 수정 필요·확인 필요 건수가 있으면 확인창으로 알려주고(담당자가 판단해요), 서버가 거절하면(공고문이 너무 짧음 등) 그 이유를 보여줘요.
+async function confirmPostingNow(id, errs, warns) {
+  const note = (errs || warns) ? `공고 점검에서 수정 필요 ${errs}건, 확인 필요 ${warns}건이 있어요. 보통 공통 안내의 [입력] 빈칸(반환·보관 안내 등)이에요.\n이 빈칸은 이력서 평가에는 영향이 없지만, 사람인·잡코리아에 올리기 전에는 채워야 해요.\n\n` : '';
+  if (!confirm(`${note}이 공고를 확정할까요? 확정하면 이력서 평가의 "평가할 공고"에 나와요.`)) return false;
+  const res = await fetch('/api/postings/' + encodeURIComponent(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) });
+  const j = await readJsonOrNull(res); if (!j) throw new Error('서버가 응답하지 못했어요.'); if (!res.ok) throw new Error(j.error || '확정하지 못했어요.');
+  await loadPostings();
+  return true;
+}
+document.getElementById('postImportResult').addEventListener('click', async e => {
+  const b = e.target.closest('.post-import-confirm'); if (!b) return;
+  b.disabled = true;
+  try {
+    const ok = await confirmPostingNow(b.dataset.pid, Number(b.dataset.errs) || 0, Number(b.dataset.warns) || 0);
+    if (ok) b.replaceWith(Object.assign(document.createElement('span'), { className: 'manage-hint', textContent: '✅ 확정했어요 — 이력서 평가 목록에 나와요' })); else b.disabled = false;
+  } catch (err) { b.disabled = false; alert(err.message || '확정하는 중 오류가 발생했어요.'); }
 });
 document.getElementById('resultImportFile').addEventListener('change', async e => {
   const r = await readJsonFile(e.target, 3 * 1024 * 1024); if (!r.data && !r.error) return;

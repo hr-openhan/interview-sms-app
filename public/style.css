@@ -1999,3 +1999,32 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 
 .career-rank-scroll { overflow-x: auto; max-width: 100%; margin-top: 6px; }
 .career-rank-scroll table { min-width: 440px; }
+
+/* 평가 사유 · ⭐ 점수 기준표 */
+.iq-ans-reason { flex: 1 1 100%; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px 9px; border: 1px dashed var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 12.5px; }
+.iq-ans-reason:focus { outline: none; border-style: solid; border-color: var(--accent, #a8552c); background: #fff; }
+.iq-reason-hint { flex: 1 1 100%; color: #8a5a1f; font-size: 12px; }
+.iq-stars { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; }
+.iq-stars summary { cursor: pointer; color: var(--accent, #a8552c); }
+.iq-stars ul { margin: 6px 0 4px; padding-left: 0; list-style: none; display: grid; gap: 2px; }
+
+.iq-ans-score { max-width: 100%; }
+.iq-ans-text { min-width: 0; }
+
+/* 승진·경력 관리: 엑셀 열 기준 표 */
+.career-arrow { color: #8a8478; }
+.career-target { color: #2f6b3b; background: #e3f0e5; padding: 0 6px; border-radius: 6px; }
+.career-detail-row td { background: #fbf9f3; padding: 10px 14px; }
+.career-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 14px; font-size: 13px; }
+.career-detail-grid > div { display: flex; flex-direction: column; gap: 1px; }
+.career-detail-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; }
+.career-more { font-size: 12.5px; }
+
+.career-table th { white-space: nowrap; }
+.career-table td[data-label="승진 검토 결과"] { white-space: nowrap; }
+.career-table td[data-label="승진 대상 직급"] { white-space: nowrap; }
+@media (min-width: 721px) { .career-table .posting-row-actions { white-space: nowrap; } .career-table .posting-row-actions button { margin-right: 4px; } }
+
+/* 확정하지 않은 공고 안내 */
+.eval-draft-note { margin: 6px 0 2px; padding: 8px 10px; border: 1px solid #ecd9a8; border-radius: 8px; background: #fff8e6; color: #6b5a2a; font-size: 13px; }
+.eval-draft-note .link-btn { margin-left: 4px; }
