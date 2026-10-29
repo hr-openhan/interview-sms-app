@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-22';
+const APP_VERSION = '2026.10.21-23';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -3174,6 +3174,22 @@ function confTag(c) {
   return ` <span class="conf-tag ${cls}">확신 ${escapeHtml(c)}${c === '낮음' ? ' · 확인 필요' : ''}</span>`;
 }
 const usePeersEl = document.getElementById('usePeers');
+// ---------- 이력서에 적힌 인적사항 보기 (점수·추천에는 쓰지 않아요) ----------
+// mode 'chips': 점수 표 줄에서 한눈에 보이게 라벨 달린 칩 / 'full': 점수표(상세)·결과 화면에서 전체
+function personalHtml(r, mode) {
+  const p = r && r.personal;
+  const NOTE = '<span class="personal-note">이력서에 적힌 정보예요. 점수·추천에는 쓰지 않아요.</span>';
+  if (!p) return `<div class="personal-chips"><span class="personal-none">인적사항: 가져온 결과에 없어요</span></div>`;
+  const v = x => (x && String(x).trim()) ? escapeHtml(x) : '<span class="personal-empty">-</span>';
+  const school = v(p.school);   // 학교 이름만 (학교 이름이 이력서에 없으면 "-"로 보여요. 전공을 학교 칸에 넣지 않아요)
+  const major = v(p.major) + (p.degree ? ` <span class="personal-sub">${escapeHtml(p.degree)}</span>` : '');
+  const salary = [p.desiredSalary ? `희망 ${escapeHtml(p.desiredSalary)}` : '', p.currentSalary ? `현재 ${escapeHtml(p.currentSalary)}` : ''].filter(Boolean).join(' · ') || '<span class="personal-empty">-</span>';
+  const career = p.totalCareer ? escapeHtml(p.totalCareer) + (p.totalCareerSource === '기간 합산' ? ' <span class="personal-sub">(기간 합산)</span>' : '') : '<span class="personal-empty">-</span>';
+  const chip = (k, val) => `<span class="personal-chip"><em>${k}</em>${val}</span>`;
+  if (mode === 'chips') return `<div class="personal-chips">${chip('성별', v(p.gender))}${chip('나이', v(p.ageLabel))}${chip('학교', school)}${chip('전공', major)}${chip('총경력', career)}${chip('연봉', salary)}</div>`;
+  const row = (k, val) => `<tr><th>${k}</th><td>${val}</td></tr>`;
+  return `<div class="personal-full"><strong>이력서에 적힌 인적사항</strong> ${NOTE}<table class="personal-table"><tbody>${row('성별', v(p.gender))}${row('나이', v(p.ageLabel))}${row('학교', school)}${row('전공', v(p.major))}${row('학력 상태', v(p.degree))}${row('총경력', career)}${row('연봉', salary)}${row('이메일', v(p.email))}${row('주소', v(p.address))}</tbody></table></div>`;
+}
 // 영역별 평가 근거 글: 비어 있을 때 AI가 직접 평가한 결과는 "-", 가져온 결과(파일)는 "가져온 결과에는 근거가 없어요"(이력서에 근거가 없다는 뜻이 아니에요)
 const commentText = (r, key) => { const c = (r.comments || {})[key]; if (c) return escapeHtml(c); return r.source === 'import' ? '<span class="manage-hint" style="margin:0">가져온 결과에는 근거가 없어요</span>' : '-'; };
 // 전공 관련성 + 이전 서류 합격자와의 비교 (결과 화면·일괄 점수 상세에서 같이 씀)
@@ -3221,6 +3237,7 @@ function renderScreening(r) {
       recomputeTotal();
     });
   });
+  document.getElementById('resumePersonal').innerHTML = personalHtml(r, 'full');   // 이력서에 적힌 인적사항(점수·추천에는 쓰지 않아요)
   resumeSummary.textContent = r.summary || '-';
   document.getElementById('peerList').innerHTML = peerLinesHtml(r);
   resumeRecommendation.textContent = r.recommendation;
@@ -4668,7 +4685,7 @@ function batchRender() {
     const canMerge = (row.state === 'wait' || row.state === 'err') && row.file && !(row.reg && row.reg.id);
     const mergeChk = canMerge ? `<label class="check-chip batch-merge-chk-chip"><input type="checkbox" class="batch-merge-chk"${row.merge ? ' checked' : ''} /> 묶기</label>` : '';
     const ungroup = canMerge && batchFilesOf(row).length > 1 ? ' <button type="button" class="link-btn batch-ungroup-btn">묶음 풀기</button>' : '';
-    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일">${mergeChk}<strong>${escapeHtml(name)}</strong>${reg}${ungroup}<span class="ap-sub">${row.file ? (batchFilesOf(row).length > 1 ? `<span title="${escapeHtml(batchFilesOf(row).map(x => x.name).join('\n'))}">📎 서류 ${batchFilesOf(row).length}개 묶음 · ${batchSizeText(batchFilesOf(row).reduce((n, x) => n + x.size, 0))}<br>${escapeHtml(batchFilesOf(row).map(x => x.name).join(', '))}</span>` : `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}`) : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
+    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일">${mergeChk}<strong>${escapeHtml(name)}</strong>${reg}${ungroup}${row.state === 'ok' && r ? personalHtml(r, 'chips') : ''}<span class="ap-sub">${row.file ? (batchFilesOf(row).length > 1 ? `<span title="${escapeHtml(batchFilesOf(row).map(x => x.name).join('\n'))}">📎 서류 ${batchFilesOf(row).length}개 묶음 · ${batchSizeText(batchFilesOf(row).reduce((n, x) => n + x.size, 0))}<br>${escapeHtml(batchFilesOf(row).map(x => x.name).join(', '))}</span>` : `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}`) : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
     return main + (row.open && row.state === 'ok' ? batchDetailHtml(row) : '');
   }).join('');
   batchBody.querySelectorAll('tr.batch-detail').forEach(async d => {
@@ -4689,6 +4706,7 @@ function batchDetailHtml(row) {
   const reqs = (r.requirements || []).map(q => `<li><span class="req-tag ${REQ_CLASS[q.status] || 'req-unk'}">${escapeHtml(q.status)}</span><strong>${escapeHtml(q.item)}</strong>${q.evidence ? ' — ' + escapeHtml(q.evidence) : ''}</li>`).join('');
   const checks = (r.interviewChecks || []).map(q => `<li><strong>${escapeHtml(q.label)}</strong> — ${q.value ? escapeHtml(q.value) : escapeHtml(q.note)}</li>`).join('');
   return `<tr class="batch-detail" data-id="${row.id}"><td colspan="7">
+    ${personalHtml(r, 'full')}
     <p><strong>${escapeHtml(r.position.name)}</strong> (${escapeHtml(r.profileLabel || '경력직')} 평가표) · 총점 ${r.total}/100 · 검토 우선순위 ${escapeHtml(r.recommendation)} <span class="manage-hint">(학력을 뺀 점수 ${r.reviewBase}점 기준 · 합격·탈락은 사람이 정해요)</span></p>
     <table class="history-table"><thead><tr><th>평가 영역</th><th>배점</th><th>점수</th><th>AI 평가 근거</th></tr></thead><tbody>${scoreRows}</tbody></table>
     ${r.summary ? `<p><strong>서류 총평:</strong> ${escapeHtml(r.summary)}</p>` : ''}

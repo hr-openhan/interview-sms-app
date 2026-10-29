@@ -2038,3 +2038,46 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .batch-merge-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 8px 0; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 10px; background: #fbf9f3; }
 .batch-merge-chk-chip { margin-right: 4px; font-size: 12px; }
 .batch-group-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #e6edf7; color: #3b5a85; font-size: 12px; }
+
+/* 이력서에 적힌 인적사항 (점수·추천에는 쓰지 않아요) */
+.personal-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 5px 0 3px; }
+.personal-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; line-height: 1.35; }
+.personal-chip em { font-style: normal; font-size: 11.5px; color: #8a8374; }
+.personal-sub { font-size: 12px; color: #6b6558; }
+.personal-empty { color: #b0a999; }
+.personal-none { font-size: 12.5px; color: #8a8374; }
+.personal-box:not(:empty) { margin: 6px 0 10px; }
+.personal-full { margin: 6px 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.personal-note { margin-left: 6px; font-size: 12px; color: #8a8374; }
+.personal-table { margin-top: 6px; border-collapse: collapse; font-size: 13.5px; }
+.personal-table th { padding: 3px 14px 3px 0; font-weight: 600; color: #6b6558; text-align: left; white-space: nowrap; vertical-align: top; }
+.personal-table td { padding: 3px 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .personal-chip { font-size: 12.5px; } }
+
+/* 점수 표: 지원자 칸을 넓혀 인적사항 칩이 한눈에 읽히게 (데스크톱만. 좁은 화면은 카드 모양이라 그대로예요) */
+@media (min-width: 761px) {
+  .batch-table th:nth-child(1) { width: 3%; }
+  .batch-table th:nth-child(2) { width: 44%; }
+  .batch-table th:nth-child(3) { width: 7%; }
+  .batch-table th:nth-child(4) { width: 11%; }
+  .batch-table th:nth-child(5) { width: 8%; }
+  .batch-table th:nth-child(6) { width: 8%; }
+  .batch-table th:nth-child(7) { width: 19%; }
+}
+.personal-chip { white-space: nowrap; }
+.personal-chip em { white-space: nowrap; }
+.personal-chips { align-items: center; }
+
+/* 좁은 화면: 칩이 화면 폭을 넘지 않게 값 안에서 줄바꿈을 허용해요 */
+@media (max-width: 760px) {
+  .personal-chip, .personal-chip em { white-space: normal; }
+  .personal-chip { max-width: 100%; box-sizing: border-box; flex-wrap: wrap; }
+  .personal-chips { max-width: 100%; }
+}
+
+/* 좁은 화면(카드 모양): 지원자·파일 칸은 라벨 옆이 아니라 위아래로 쌓아서 이름과 칩이 폭을 다 쓰게 해요 */
+@media (max-width: 760px) {
+  .batch-table td[data-label="지원자 · 파일"] { display: block; text-align: left; }
+  .batch-table td[data-label="지원자 · 파일"]::before { display: block; margin-bottom: 2px; }
+  .batch-table td[data-label="지원자 · 파일"] .ap-sub { display: block; text-align: left; }
+}
