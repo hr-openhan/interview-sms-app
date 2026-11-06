@@ -785,7 +785,7 @@ body {
   text-decoration-color: var(--accent);
 }
 
-.history-schedule-btn {
+.history-schedule-btn, .history-edit-btn {
   padding: 4px 10px;
   border: 1px solid var(--accent);
   background: var(--panel);
@@ -996,7 +996,7 @@ body {
   min-width: 0;
   padding: 5px 4px;
 }
-.history-main-table .history-schedule-btn {
+.history-main-table .history-schedule-btn, .history-main-table .history-edit-btn {
   padding: 4px 5px;
   font-size: 11.5px;
 }
@@ -1023,7 +1023,7 @@ body {
   .history-main-table th:nth-child(8)  { width: 8%; }
   .history-main-table th:nth-child(9)  { width: 15%; }
   .history-main-table th:nth-child(10) { width: 19%; }
-  .history-main-table .history-schedule-btn { padding: 3px 4px; font-size: 11px; }
+  .history-main-table .history-schedule-btn, .history-main-table .history-edit-btn { padding: 3px 4px; font-size: 11px; }
 }
 
 /* 폰 화면(560px 이하): 표 대신 한 건씩 카드로 보여줌 (옆으로 넘어가지 않게) */
@@ -1067,7 +1067,7 @@ body {
   .history-main-table .attendance-select { width: auto; min-width: 96px; }
   .history-main-table .history-name-btn,
   .history-main-table .history-msg-btn { max-width: none; white-space: normal; text-align: right; }
-  .history-main-table .history-schedule-btn { padding: 6px 12px; font-size: 12.5px; }
+  .history-main-table .history-schedule-btn, .history-main-table .history-edit-btn { padding: 6px 12px; font-size: 12.5px; }
   .history-main-table .empty-row { display: block; text-align: center; }
 }
 
@@ -2081,3 +2081,74 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
   .batch-table td[data-label="지원자 · 파일"]::before { display: block; margin-bottom: 2px; }
   .batch-table td[data-label="지원자 · 파일"] .ap-sub { display: block; text-align: left; }
 }
+
+/* 점수표(상세): 열 폭을 직접 정하고 글을 자르지 않아요. 평가 영역·배점·점수는 좁게, AI 평가 근거를 넓게 */
+.detail-score-wrap { max-width: 100%; overflow-x: auto; margin: 6px 0 12px; }
+.detail-score-table { display: table; table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 13.5px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.detail-score-table th, .detail-score-table td { padding: 10px 12px; text-align: left; vertical-align: top; white-space: normal; overflow: visible; text-overflow: clip; max-width: none; overflow-wrap: anywhere; word-break: keep-all; line-height: 1.6; border-bottom: 1px solid var(--line); background: transparent; }
+.detail-score-table thead th { background: #f4f1e8; color: var(--muted); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.detail-score-table tbody tr:last-child td { border-bottom: none; }
+.detail-score-table th.ds-area, .detail-score-table td.ds-area { width: 17%; }
+.detail-score-table th.ds-max, .detail-score-table td.ds-max { width: 8%; text-align: center; color: var(--muted); }
+.detail-score-table th.ds-score, .detail-score-table td.ds-score { width: 8%; text-align: center; font-weight: 700; font-size: 15px; }
+.detail-score-table th.ds-why, .detail-score-table td.ds-why { width: 67%; }
+.detail-score-table td.ds-area strong { white-space: nowrap; }
+.detail-score-table tbody tr:nth-child(even) td { background: #fbf9f3; }
+/* 좁은 화면: 한 영역을 카드로 — 영역 이름과 점수가 윗줄에, 근거는 그 아래 전체 폭 */
+@media (max-width: 760px) {
+  .detail-score-table, .detail-score-table tbody { display: block; width: 100%; }
+  .detail-score-table thead { display: none; }
+  .detail-score-table tbody tr { display: grid; grid-template-columns: 1fr auto auto; column-gap: 10px; align-items: baseline; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .detail-score-table tbody tr:last-child { border-bottom: none; }
+  .detail-score-table td { display: block; width: auto !important; padding: 2px 0; border: none; background: transparent !important; }
+  .detail-score-table td::before { content: none !important; display: none !important; }   /* 공통 카드 규칙의 data-label 라벨은 이 표에서는 쓰지 않아요(영역 이름·점수가 이미 구분돼요) */
+  .detail-score-table td.ds-area { grid-column: 1; grid-row: 1; align-self: baseline; }
+  .detail-score-table td.ds-score { grid-column: 2; grid-row: 1; font-size: 17px; text-align: right; white-space: nowrap; }
+  .detail-score-table td.ds-max { grid-column: 3; grid-row: 1; text-align: left; white-space: nowrap; font-size: 12.5px; }
+  .detail-score-table td.ds-max::after { content: ''; }
+  .detail-score-table td.ds-why { grid-column: 1 / -1; grid-row: 2; padding-top: 4px; color: #4a453b; text-align: left; }
+}
+}
+
+/* 공고별로 저장된 점수 결과 */
+.batch-saved-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #e8efe6; color: #3d6a44; font-size: 12px; }
+
+/* 저장된 결과 보관·자동 삭제 */
+.batch-retention { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbf9f3; }
+.batch-retention > summary { cursor: pointer; font-weight: 600; }
+.ret-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0; }
+.ret-row input[type="number"] { width: 74px; }
+.batch-expire { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #f1efe7; color: #6b6558; font-size: 12px; }
+.batch-expire.soon { background: #fbe3dc; color: #a2412d; font-weight: 600; }
+
+/* 최종 합격(인사서류) 표시 */
+.batch-hired-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #e3ecf8; color: #2f5a94; font-size: 12px; font-weight: 600; }
+
+/* 면접 관리: 보기 전환·월 선택·팀별 면접 일정 */
+.ap-viewswitch { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.ap-monthbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 10px; }
+.ap-monthbar input[type="month"] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.ap-monthsummary { margin: 4px 0 10px; font-size: 14.5px; }
+.ap-teamgroup { margin: 14px 0; }
+.ap-teamgroup > h3 { margin: 0 0 6px; padding: 6px 10px; border-left: 4px solid var(--accent, #a8552c); background: #fbf9f3; font-size: 15px; }
+.ap-teamcount { margin-left: 6px; font-size: 12.5px; font-weight: 400; color: #6b6558; }
+.ap-round { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 9px; background: #e8efe6; color: #3d6a44; font-size: 12px; }
+.ap-mtable td { vertical-align: top; }
+.ap-mtable td[data-label=""] { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+@media (max-width: 760px) {
+  .ap-mtable td[data-label=""] { justify-content: flex-start; }
+  .ap-mtable td[data-label=""]::before { display: none; }
+}
+/* 면접 일정 보기: 날짜·시각과 배지(차수·일정 일치)는 글자 중간에서 줄바꿈하지 않고, 자리가 모자라면 통째로 아래로 내려가요 */
+.ap-mtable td[data-label="일시"] strong, .ap-mtable td[data-label="일시"] .ap-round, .ap-mtable td[data-label="일시"] .ap-sch { white-space: nowrap; }
+.ap-mtable td[data-label="일시"] .ap-round, .ap-mtable td[data-label="일시"] .ap-sch { display: inline-block; }
+@media (max-width: 760px) { .ap-mtable td[data-label="일시"] { text-align: right; } .ap-mtable td[data-label="일시"] .ap-sch { margin-top: 2px; } }
+
+/* 발송 이력 수정 */
+.hist-edited { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #fbe9d4; color: #9a5a12; font-size: 12px; white-space: nowrap; }
+.history-actions-cell { white-space: normal; }
+.history-actions-cell button { display: block; margin: 0 0 4px; }   /* 줄 끝 칸의 가로 폭이 늘어나 표가 잘리지 않게 두 버튼을 세로로 쌓아요 */
+.history-actions-cell button:last-child { margin-bottom: 0; }
+@media (max-width: 760px) { .history-actions-cell button { display: inline-block; margin: 0 6px 0 0; } }
+#histEditModal .field { margin: 10px 0; } #histEditModal select, #histEditModal input[type="text"] { width: 100%; box-sizing: border-box; }
+#histEditModal .modal-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-23">
+<html lang="ko" data-app-version="2026.10.21-29">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -515,13 +515,14 @@
       <section class="panel" id="batchSection" style="margin-top: 24px;" data-menu="resume" data-edit="resume">
         <h2>여러 이력서 한꺼번에 점수 보기</h2>
         <p class="manage-hint">PDF 이력서를 여러 개 올리면 <strong>점수만</strong> 보여줘요. 노션 등록은 줄마다 <strong>직접</strong> 눌러요.</p>
-        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">위 "평가할 공고"를 고른 뒤 PDF 이력서를 여러 개 올리면(최대 20개, 파일당 4MB 이하) <strong>점수만 표로 보여줘요.</strong> 노션 페이지는 <strong>자동으로 만들지 않아요.</strong> 서류 합격시킬 사람은 줄 끝의 <strong>"서류 합격 확정"</strong> 버튼을 직접 눌러주세요. 확정하면 노션에 지원자 카드가 만들어지고, 이어서 면접 문자·일정 등록으로 넘어갈 수 있어요. 점수는 검토 순서를 정하는 참고이고, 합격·탈락은 사람이 정해요. 평가 결과는 저장되지 않아서 화면을 닫으면 사라져요(노션에 등록한 사람만 남아요).</p></details>
+        <details class="help"><summary>자세히 보기</summary><p class="manage-hint">위 "평가할 공고"를 고른 뒤 PDF 이력서를 여러 개 올리면(최대 20개, 파일당 4MB 이하) <strong>점수만 표로 보여줘요.</strong> 노션 페이지는 <strong>자동으로 만들지 않아요.</strong> 서류 합격시킬 사람은 줄 끝의 <strong>"서류 합격 확정"</strong> 버튼을 직접 눌러주세요. 확정하면 노션에 지원자 카드가 만들어지고, 이어서 면접 문자·일정 등록으로 넘어갈 수 있어요. 점수는 검토 순서를 정하는 참고이고, 합격·탈락은 사람이 정해요. 점수 결과는 <strong>공고별로 서버에 저장</strong>돼서, 화면을 닫거나 다른 공고에 갔다 와도 그 공고를 고르면 다시 떠요(이름·연락처·나이 같은 인적사항도 함께 저장돼요). <strong>이력서 PDF 원본은 저장하지 않아요.</strong> 필요 없어지면 줄의 "삭제"나 아래 "이 공고의 저장된 결과 모두 삭제"로 지우세요. 공고를 지우면 함께 지워져요.</p></details>
         <div class="field"><input id="batchFiles" type="file" accept="application/pdf,.pdf" multiple aria-label="이력서 PDF 여러 개 고르기" /></div>
         <p class="manage-hint" id="batchFileInfo"></p>
         <label class="check-chip" style="margin-bottom:8px"><input id="batchUsePeers" type="checkbox" checked /> 노션의 이전 서류 합격자를 참고해서 평가 (지원직무·전공·주요경력만 보내요)</label>
         <div class="posting-actions">
           <button id="batchRunBtn" class="add-btn" type="button">점수 보기</button>
-          <button id="batchClearBtn" class="link-btn" type="button">목록 비우기</button>
+          <button id="batchClearBtn" class="link-btn" type="button">목록 비우기 (화면만)</button>
+        <button id="batchDeleteAllSavedBtn" class="link-btn" type="button" title="선택한 공고로 저장된 점수 결과를 서버에서 모두 지워요">이 공고의 저장된 결과 모두 삭제</button>
           <select id="batchSort" aria-label="정렬"><option value="score">총점 높은 순</option><option value="file">올린 순서</option></select>
         </div>
         <div id="batchMergeBar" class="batch-merge-bar" hidden>
@@ -529,6 +530,15 @@
           <button id="batchMergeBtn" class="link-btn" type="button">선택한 줄 한 명으로 묶기</button>
           <button id="batchMergeSuggestBtn" class="link-btn" type="button">같은 이름끼리 묶기 제안</button>
         </div>
+        <details id="batchRetentionBox" class="batch-retention">
+          <summary>🗓 저장된 결과 보관·자동 삭제 <span id="retSummary" class="manage-hint" style="margin:0"></span></summary>
+          <p class="manage-hint">채용절차법은 채용 여부가 <strong>확정된 날부터 14~180일</strong> 안에서 회사가 정한 기간 동안만 채용서류를 보관하고, 그 뒤에는 개인정보 보호법에 따라 파기하게 해요(파기는 보통 5일 이내로 안내돼요). 이 앱에 저장된 점수 결과도 같은 기준으로 <strong>정한 날이 지나면 자동으로 지워요.</strong> 보관 기간은 <strong>지원자에게 안내한 반환 청구 기간과 같거나 짧게</strong> 맞춰 주세요. 법률 판단은 노무사·법무 담당자에게 확인하세요.</p>
+          <div class="ret-row"><label>보관 기간 <input id="retDays" type="number" min="14" max="180" step="1" inputmode="numeric" /> 일 <span class="manage-hint" style="margin:0">(14~180일)</span></label> <button id="retDaysBtn" class="link-btn" type="button">저장</button></div>
+          <div class="ret-row"><label>합격자(인사서류) 보관 <input id="retHiredYears" type="number" min="3" max="10" step="1" inputmode="numeric" /> 년</label> <button id="retHiredBtn" class="link-btn" type="button">저장</button> <span class="manage-hint" style="margin:0">줄의 "최종 합격"으로 표시한 사람에게만 적용돼요. 합격 확정일부터 세고, 채용서류 반환 청구 기간(14~180일)은 적용되지 않아요. 입사하지 않은 합격자는 표시하지 마세요.</span></div>
+          <div class="ret-row"><label>이 공고의 채용 여부 확정일 <input id="retConfirm" type="date" /></label> <button id="retConfirmBtn" class="link-btn" type="button">저장</button> <button id="retConfirmClear" class="link-btn" type="button">지우기</button> <span class="manage-hint" style="margin:0">정하지 않으면 저장일부터 세요. 확정일을 넣으면 확정일부터 세요.</span></div>
+          <p class="status" id="retStatus"></p>
+          <details class="help"><summary>삭제 기록 보기 (이름·연락처는 기록하지 않아요)</summary><ul class="req-list" id="retLog"></ul></details>
+        </details>
         <div id="batchPostingChips" class="batch-posting-chips" role="group" aria-label="공고별 보기" hidden></div>
         <div class="import-box" data-edit="resume">
           <label class="link-btn import-label">📂 채점 결과 파일 가져오기 (.json)<input id="resultImportFile" type="file" accept="application/json,.json" hidden /></label>
@@ -827,8 +837,16 @@
     <div id="interviewView" class="resume-view" hidden>
       <section class="panel" data-menu="resume">
         <h2>면접 관리</h2>
-        <p class="manage-hint">노션 「진행중 채용」과 <strong>같은 데이터</strong>예요. 지원자 줄에서 <strong>합격 여부·면접 일정</strong>을 바꾸면 노션에 바로 반영되고, 노션에서 바꾼 내용은 <strong>새로고침</strong>하면 여기에도 보여요. 면접 일정이 <strong>문자 보내기의 면접 일정과 맞는지</strong> 배지로 비교해 주고, <strong>📨 면접 문자·📅 일정</strong>으로 문자·일정 화면을 채울 수 있어요. 줄의 <strong>면접 질문·답변</strong>을 누르면 아래에서 맞춤 질문을 만들고 <strong>답변·점수(⭐)를 적어 노션에 전송</strong>해요. 탈락·채용은 AI가 아니라 <strong>사람이 직접</strong> 바꿔요.</p>
+        <p class="manage-hint">노션 「진행중 채용」과 <strong>같은 데이터</strong>예요. 바꾸면 노션에 바로 반영돼요. 탈락·채용은 AI가 아니라 <strong>사람이 직접</strong> 바꿔요.</p>
+          <details class="help"><summary>자세히 보기</summary><p class="manage-hint">노션에서 바꾼 내용은 <strong>새로고침</strong>하면 여기에도 보여요. 면접 일정이 <strong>문자 보내기의 면접 일정과 맞는지</strong> 배지로 비교해 주고, <strong>📨 면접 문자·📅 일정</strong>으로 문자·일정 화면을 채울 수 있어요. 줄의 <strong>면접 질문·답변</strong>을 누르면 아래에서 맞춤 질문을 만들고 <strong>답변·점수(⭐)를 적어 노션에 전송</strong>해요.</p></details>
         <p class="status err" id="apNotice" hidden></p>
+        <div class="ap-viewswitch" role="tablist" aria-label="면접 관리 보기"><button type="button" id="apViewList" class="sub-btn active" role="tab" aria-selected="true">지원자 목록</button><button type="button" id="apViewMonth" class="sub-btn" role="tab" aria-selected="false">면접 일정 (월별·팀별)</button></div>
+        <div id="apMonthBar" class="ap-monthbar" hidden>
+          <button type="button" id="apPrevMonth" class="link-btn" aria-label="이전 달">◀</button>
+          <input type="month" id="apMonth" aria-label="면접이 있는 달" />
+          <button type="button" id="apNextMonth" class="link-btn" aria-label="다음 달">▶</button>
+          <button type="button" id="apThisMonth" class="link-btn">이번 달</button>
+        </div>
         <div class="ap-filters">
           <select id="apStatus" aria-label="면접상태"></select>
           <select id="apTeam" aria-label="팀"><option value="">전체 팀</option></select>
@@ -837,9 +855,10 @@
           <a id="apNotionLink" class="link-btn" href="#" target="_blank" rel="noopener" hidden>노션에서 열기</a>
         </div>
         <p class="status" id="apMsg"></p>
-        <table class="history-table stack-table ap-table">
+        <div id="apMonthBody" class="ap-monthbody" hidden></div>
+        <table class="history-table stack-table ap-table" id="apTable">
           <thead>
-            <tr><th>이름</th><th>팀 · 직무</th><th>면접상태 (합격 여부·채용 과정)</th><th>1차 면접</th><th>2차 면접</th><th>점수 · 추천</th><th></th></tr>
+            <tr><th>이름</th><th>팀 · 직무</th><th>면접상태</th><th>1차 면접</th><th>2차 면접</th><th>점수 · 추천</th><th></th></tr>
           </thead>
           <tbody id="apBody"></tbody>
         </table>
@@ -982,6 +1001,20 @@
       </div>
       <div class="modal-meta" id="msgModalMeta"></div>
       <pre class="modal-body" id="msgModalBody"></pre>
+    </div>
+  </div>
+
+  <div id="histEditModal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><h3>발송 이력 수정</h3><button id="histEditClose" class="modal-close" aria-label="닫기">×</button></div>
+      <p class="manage-hint" id="histEditWho" style="margin-top:0"></p>
+      <p class="manage-hint">잘못 고른 <strong>양식 이름</strong>을 바로잡는 기능이에요. <strong>이미 나간 문자 내용·받는 사람·성공/실패는 바뀌지 않아요</strong>(실제로 보낸 사실이라서요).</p>
+      <div class="field"><label for="histEditTemplate">양식</label><select id="histEditTemplate"></select><input id="histEditTemplateCustom" type="text" maxlength="40" placeholder="양식 이름을 직접 입력" autocomplete="off" hidden /></div>
+      <div class="field"><label for="histEditProposed">면접 제안 일시</label><input id="histEditProposed" type="text" maxlength="60" autocomplete="off" /></div>
+      <div class="field"><label for="histEditMemo">메모</label><input id="histEditMemo" type="text" maxlength="300" autocomplete="off" /></div>
+      <p class="manage-hint" id="histEditOrig" hidden></p>
+      <p class="status" id="histEditStatus"></p>
+      <div class="modal-actions"><button id="histEditSave" class="send-btn" type="button">저장</button><button id="histEditCancel" class="link-btn" type="button">취소</button><button id="histEditRevert" class="link-btn" type="button" hidden>처음 양식으로 되돌리기</button></div>
     </div>
   </div>
 
