@@ -309,10 +309,11 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-23';
+const APP_VERSION = '2026.10.21-29';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
+  '/api/cron/purge-results',   // 비밀 키(CRON_SECRET)가 맞을 때만 동작해요
 ]);
 app.use(async (req, res, next) => {
   try {
@@ -381,6 +382,12 @@ const PERMISSION_RULES = [
   R('POST',   /^\/api\/screen-resume$/,           [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze$/,         [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze-multi$/,   [['resume', 'edit']]),
+  R('GET',    /^\/api\/resume\/results$/,         [['resume', 'edit']]),
+  R('GET',    /^\/api\/resume\/results-counts$/,  [['resume', 'edit']]),
+  R('GET',    /^\/api\/resume\/retention$/,       [['resume', 'edit']]),
+  R('PUT',    /^\/api\/resume\/retention$/,       [['resume', 'edit']]),
+  R('PUT',    /^\/api\/resume\/results\/[^/]+$/,   [['resume', 'edit']]),
+  R('DELETE', /^\/api\/resume\/results(\/[^/]+)?$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/notion\/attach-resume$/,    [['resume', 'edit']]),
   R('GET',    /^\/api\/notion\/status$/,          [['send', 'view'], ['resume', 'view']]),
   R('GET',    /^\/api\/notion\/applicants$/,      [['send', 'view'], ['resume', 'view']]),
@@ -899,16 +906,44 @@ app.delete('/api/history/failed', ah(async (req, res) => {
   res.json({ success: true, removedCount });
 }));
 
-// 발송 이력 참석여부(응답/미응답/불참) 수정
+// 발송 이력 수정: 참석여부, 그리고 잘못 고른 양식·면접 제안 일시·메모를 바로잡아요.
+// 이미 나간 문자 내용(message)·받는 사람(이름·연락처)·성공/실패 결과는 사실이라 고치지 않아요.
+// 양식을 고치면 처음 양식을 templateLabelOriginal에 한 번만 보관하고(되돌릴 수 있게), 고친 시각을 editedAt에 남겨요.
+const HISTORY_EDIT_LIMITS = { label: 40, proposed: 60, memo: 300 };
 app.put('/api/history/:id', ah(async (req, res) => {
-  const { attendance } = req.body;
+  const b = req.body || {};
   const list = await loadHistory();
   const idx = list.findIndex(h => h.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: '이력을 찾을 수 없습니다.' });
-
-  list[idx] = { ...list[idx], ...(attendance !== undefined && { attendance }) };
+  const cur = list[idx]; const patch = {};
+  const textField = (key, label, max, { required = false } = {}) => {
+    if (b[key] === undefined) return null;
+    if (typeof b[key] !== 'string') return `${label} 형식이 올바르지 않아요.`;
+    const v = b[key].replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (required && !v) return `${label}을(를) 입력해주세요.`;
+    if (v.length > max) return `${label}은(는) ${max}자 이내로 입력해주세요.`;
+    patch[key] = v; return null;
+  };
+  if (b.attendance !== undefined) {
+    if (!['미응답', '참석', '불참석'].includes(b.attendance)) return res.status(400).json({ error: '참석여부는 미응답·참석·불참석 중에서 골라주세요.' });
+    patch.attendance = b.attendance;
+  }
+  const err = textField('templateLabel', '양식', HISTORY_EDIT_LIMITS.label, { required: true }) || textField('proposedDate', '면접 제안 일시', HISTORY_EDIT_LIMITS.proposed) || textField('memo', '메모', HISTORY_EDIT_LIMITS.memo);
+  if (err) return res.status(400).json({ error: err });
+  const next = { ...cur, ...patch };
+  const changedBy = ['templateLabel', 'proposedDate', 'memo'].filter(k => patch[k] !== undefined && patch[k] !== (cur[k] ?? ''));
+  if (changedBy.length) {
+    const labelChanged = changedBy.includes('templateLabel'), otherChanged = changedBy.some(k => k !== 'templateLabel');
+    if (labelChanged && cur.templateLabelOriginal === undefined) next.templateLabelOriginal = cur.templateLabel;   // 처음 양식은 한 번만 보관
+    const backToOriginal = next.templateLabelOriginal !== undefined && next.templateLabelOriginal === next.templateLabel;
+    if (backToOriginal) delete next.templateLabelOriginal;   // 원래 양식으로 되돌리면 양식의 "수정됨" 표시를 지워요
+    // 고친 흔적(editedAt): 양식이 원래와 다르거나 이번에 제안 일시·메모를 고쳤을 때만 남기고, 양식을 되돌리기만 했다면 지워요
+    if (next.templateLabelOriginal !== undefined || otherChanged) next.editedAt = new Date().toISOString();
+    else delete next.editedAt;
+  }
+  list[idx] = next;
   await saveHistoryList(list);
-  res.json(list[idx]);
+  res.json(next);
 }));
 
 // 발송 이력 개별 삭제
@@ -1989,7 +2024,9 @@ app.post('/api/resume/import-results', ah(async (req, res) => {
     result.source = 'import';
     result.interviewChecks = buildImportedInterviewChecks(it.interviewInfo);   // 값이 없을 때 "이력서에 없어요"라고 단정하지 않아요
     result.majorFit = { ...result.majorFit, imported: true };               // 전공 관련성도 같은 이유로 화면 문구를 달리 써요
-    results.push({ name: nm, ok: true, result });
+    const sv = await persistResult(ctx.position.id, result, [], 'import').catch(e => ({ ok: false, error: e.message }));
+    if (sv.ok || sv.kept) result.rid = sv.rid;
+    results.push({ name: nm, ok: true, result, saved: sv.ok ? (sv.replaced ? 'replaced' : 'saved') : (sv.kept ? 'kept' : (sv.full ? 'full' : 'failed')) });
   }
   res.json({ success: true, imported: results.filter(x => x.ok).length, failed: results.filter(x => !x.ok).length, position: { id: ctx.position.id, name: ctx.position.name, profile: ctx.position.profile }, results });
 }));
@@ -2048,7 +2085,11 @@ app.put('/api/postings/:id', ah(async (req, res) => {
 app.delete('/api/postings/:id', ah(async (req, res) => {
   const list = await loadPostings();
   if (!list.some(x => x.id === req.params.id)) return res.status(404).json({ error: '공고를 찾을 수 없어요.' });
+  const hiredN = (await loadResults(req.params.id).catch(() => [])).filter(x => x.hired).length;
+  if (hiredN) return res.status(409).json({ error: `이 공고에는 최종 합격으로 표시해 인사서류로 보관 중인 결과가 ${hiredN}명 있어요. 공고를 지우면 함께 지워지니, 먼저 합격 표시를 풀거나 한 명씩 삭제해 주세요.` });
   await savePostings(list.filter(x => x.id !== req.params.id));
+  await saveResults(req.params.id, []).catch(() => {});   // 그 공고로 저장해 둔 점수 결과(개인정보 포함)도 함께 지워요
+  loadRetention().then(r => { if (r.confirmed[req.params.id]) { delete r.confirmed[req.params.id]; return saveRetention(r); } }).catch(() => {});
   res.json({ success: true });
 }));
 
@@ -4070,6 +4111,87 @@ app.post('/api/screen-resume/import', ah(async (req, res) => {
   res.json({ success: true, result });
 }));
 
+// ---------- 이력서 점수 결과를 공고별로 저장 (점수 표를 다시 열어도 그 공고의 결과가 뜨게) ----------
+// 공고마다 키 하나(resume-results:<공고 id>). PDF 원본은 저장하지 않고 평가 결과(점수·근거·인적사항 등)만 저장해요.
+// 이름·연락처·나이 같은 개인정보가 들어 있으니 화면의 "삭제"로 지울 수 있고, 공고를 지우면 함께 지워져요.
+const RESULTS_MAX_PER_POSTING = 100;
+const RESULT_ID_RE = /^rs_[0-9a-f]{16}$/;
+const resultsKey = pid => `resume-results:${pid}`;
+const resultsPath = pid => path.join(DATA_DIR, `resume-results-${String(pid).replace(/[^A-Za-z0-9_-]/g, '')}.json`);
+async function loadResults(pid) {
+  const v = await storeGet(resultsKey(pid), resultsPath(pid), []);
+  return Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && RESULT_ID_RE.test(String(x.rid || '')) && x.result) : [];
+}
+async function saveResults(pid, list) { await storeSet(resultsKey(pid), resultsPath(pid), list); }
+function newResultId() { return 'rs_' + require('crypto').randomBytes(8).toString('hex'); }
+function resultName(r) { return String((r && r.candidate && r.candidate.name) || '').trim(); }
+// 한 공고에 결과를 저장해요. 같은 이름이 있으면 마지막 결과로 바꾸되, 이미 노션에 기록한 항목(reg)은 건드리지 않아요.
+async function persistResult(pid, result, files, source) {
+  const list = await loadResults(pid);
+  const nm = resultName(result);
+  const idx = nm ? list.findIndex(x => resultName(x.result) === nm) : -1;
+  if (idx >= 0 && ((list[idx].reg && list[idx].reg.id) || list[idx].hired)) return { ok: false, kept: true, rid: list[idx].rid, reason: list[idx].hired ? 'hired' : 'registered' };
+  if (idx < 0 && list.length >= RESULTS_MAX_PER_POSTING) return { ok: false, full: true, reason: 'full' };
+  const rid = idx >= 0 ? list[idx].rid : newResultId();
+  const entry = { rid, savedAt: new Date().toISOString(), source: source === 'pdf' ? 'pdf' : 'import', files: (files || []).map(f => String(f || '').slice(0, 120)).slice(0, 4), reg: null, result: { ...result, rid } };
+  if (idx >= 0) list[idx] = entry; else list.push(entry);
+  await saveResults(pid, list);
+  return { ok: true, rid, replaced: idx >= 0 };
+}
+
+// ---------- 저장된 점수 결과의 보관 기간과 자동 삭제 ----------
+// 근거: 채용절차법은 채용 여부가 확정된 날부터 14~180일 안에서 구인자가 정한 기간 동안 채용서류를 보관하게 하고, 그 기간이 지나면 개인정보 보호법에 따라 파기하게 해요(파기는 보통 5일 이내로 안내돼요).
+// 이 앱이 저장하는 점수 결과는 채용서류 자체는 아니지만 거기서 읽은 개인정보가 들어 있어서 같은 기준으로 지워요.
+// 기본 보관 기간은 법이 허용하는 최대인 180일이에요. 지원자에게 안내한 반환 청구 기간(14~180일)보다 길면 안 되니 회사가 정한 값으로 맞추세요.
+const RETENTION_MIN_DAYS = 14, RETENTION_MAX_DAYS = 180, RETENTION_DEFAULT_DAYS = 180;
+// 최종 합격(입사 확정)으로 표시한 사람은 채용서류가 아니라 인사서류로 봐서 채용서류 반환 청구 기간(14~180일)을 적용하지 않고, 합격 확정일부터 아래 연수만큼 보관해요(회사가 정하는 보유기간이에요. 근로기준법상 일부 서류의 보존 기한이 3년이라 3년 밑으로는 못 정하게 했어요).
+const HIRED_MIN_YEARS = 3, HIRED_MAX_YEARS = 10, HIRED_DEFAULT_YEARS = 5;
+const RETENTION_PATH = path.join(DATA_DIR, 'resume-retention.json');
+const PURGE_LOG_PATH = path.join(DATA_DIR, 'resume-purge-log.json');
+const isIsoDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && isRealDate(String(v));
+async function loadRetention() {
+  const v = await storeGet('resume-retention', RETENTION_PATH, null);
+  const days = v && Number.isInteger(v.days) && v.days >= RETENTION_MIN_DAYS && v.days <= RETENTION_MAX_DAYS ? v.days : RETENTION_DEFAULT_DAYS;
+  const confirmed = {}; if (v && v.confirmed && typeof v.confirmed === 'object') for (const [k, d] of Object.entries(v.confirmed)) if (isIsoDay(d)) confirmed[String(k).slice(0, 60)] = d;
+  const hiredYears = v && Number.isInteger(v.hiredYears) && v.hiredYears >= HIRED_MIN_YEARS && v.hiredYears <= HIRED_MAX_YEARS ? v.hiredYears : HIRED_DEFAULT_YEARS;
+  return { days, confirmed, hiredYears };
+}
+async function saveRetention(r) { await storeSet('resume-retention', RETENTION_PATH, { days: r.days, confirmed: r.confirmed, hiredYears: r.hiredYears }); }
+const addDaysIso = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const todayKst = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+// 이 항목의 삭제 예정일(YYYY-MM-DD). 채용 여부 확정일이 있으면 그날부터, 없으면 저장일부터 보관 기간을 세요.
+const addYearsIso = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() + n); return d.toISOString().slice(0, 10); };
+function resultExpiry(entry, pid, ret) {
+  if (entry.hired && isIsoDay(entry.hired.date)) return addYearsIso(entry.hired.date, ret.hiredYears);   // 인사서류: 합격 확정일부터 N년
+  const base = ret.confirmed[pid] || String(entry.savedAt || '').slice(0, 10) || todayKst();
+  return addDaysIso(base, ret.days);
+}
+async function appendPurgeLog(rec) {
+  try {
+    const log = await storeGet('resume-purge-log', PURGE_LOG_PATH, []);
+    const list = Array.isArray(log) ? log : [];
+    list.unshift({ at: new Date().toISOString(), ...rec });
+    await storeSet('resume-purge-log', PURGE_LOG_PATH, list.slice(0, 200));   // 이름·연락처는 기록하지 않아요(공고·인원수·사유만)
+  } catch { /* 기록을 못 남겨도 삭제는 그대로 해요 */ }
+}
+// 기한이 지난 항목을 지워요. 지운 인원을 돌려줘요.
+async function purgeExpiredFor(pid, ret, postingName) {
+  const list = await loadResults(pid);
+  const today = todayKst();
+  const gone = list.filter(x => resultExpiry(x, pid, ret) <= today);
+  if (!gone.length) return 0;
+  await saveResults(pid, list.filter(x => resultExpiry(x, pid, ret) > today));
+  const hiredGone = gone.filter(x => x.hired).length, normalGone = gone.length - hiredGone;
+  if (normalGone) await appendPurgeLog({ positionId: pid, positionName: String(postingName || '').slice(0, 80), deleted: normalGone, reason: '보관 기간 만료' });
+  if (hiredGone) await appendPurgeLog({ positionId: pid, positionName: String(postingName || '').slice(0, 80), deleted: hiredGone, reason: '인사서류 보관 기간 만료' });
+  return gone.length;
+}
+async function purgeExpiredAll() {
+  const ret = await loadRetention(); const postings = await loadPostings(); let total = 0;
+  for (const p of postings) total += await purgeExpiredFor(p.id, ret, p.position);
+  return total;
+}
+
 // PDF 업로드 (Content-Type: application/pdf 로 파일 내용을 그대로 보냅니다)
 const pdfBody = express.raw({ type: 'application/pdf', limit: PDF_MAX_BYTES });
 function takePdf(req, res) {
@@ -4094,7 +4216,9 @@ app.post('/api/resume/analyze', pdfBody, ah(async (req, res) => {
   if (!ctx) return;
   try {
     const result = await screenWithClaude(ctx.criteria, ctx.position, { pdfBase64: buf.toString('base64') });
-    res.json({ success: true, result: { ...result, source: 'pdf' } });
+    const out = { ...result, source: 'pdf' };
+    if (req.query.save === '1') { const sv = await persistResult(ctx.position.id, out, [String(req.query.filename || '')], 'pdf').catch(e => ({ ok: false, error: e.message })); if (sv.ok || sv.kept) out.rid = sv.rid; res.json({ success: true, result: out, saved: sv.ok ? 'saved' : (sv.kept ? 'kept' : (sv.full ? 'full' : 'failed')) }); return; }
+    res.json({ success: true, result: out });
   } catch (err) { sendScreeningError(res, err, 'resume-analyze'); }
 }));
 
@@ -4132,8 +4256,109 @@ app.post('/api/resume/analyze-multi', bundleBody, ah(async (req, res) => {
   if (!ctx) return;
   try {
     const result = await screenWithClaude(ctx.criteria, ctx.position, { pdfBase64List: files.map(f => f.data.toString('base64')), fileNames: files.map(f => f.name) });
-    res.json({ success: true, result: { ...result, source: 'pdf', fileCount: files.length } });
+    const out = { ...result, source: 'pdf', fileCount: files.length };
+    if (req.query.save === '1') { const sv = await persistResult(ctx.position.id, out, files.map(f => f.name), 'pdf').catch(e => ({ ok: false, error: e.message })); if (sv.ok || sv.kept) out.rid = sv.rid; res.json({ success: true, result: out, saved: sv.ok ? 'saved' : (sv.kept ? 'kept' : (sv.full ? 'full' : 'failed')) }); return; }
+    res.json({ success: true, result: out });
   } catch (err) { sendScreeningError(res, err, 'resume-analyze-multi'); }
+}));
+
+// 저장된 점수 결과 조회·기록 표시·삭제
+app.get('/api/resume/results', ah(async (req, res) => {
+  const pid = String(req.query.positionId || '');
+  const posting = pid ? (await loadPostings()).find(x => x.id === pid) : null;
+  if (!posting) return res.status(400).json({ error: '공고를 먼저 선택해주세요.' });
+  const ret = await loadRetention();
+  await purgeExpiredFor(pid, ret, posting.position);   // 기한이 지난 결과는 불러오기 전에 지워요
+  const list = await loadResults(pid);
+  res.json({ success: true, positionId: pid, retention: { days: ret.days, hiredYears: ret.hiredYears, confirmedDate: ret.confirmed[pid] || '' }, results: list.map(x => ({ rid: x.rid, savedAt: x.savedAt, expiresAt: resultExpiry(x, pid, ret), source: x.source, files: x.files || [], reg: x.reg || null, hired: x.hired || null, result: x.result })) });
+}));
+app.get('/api/resume/results-counts', ah(async (req, res) => {
+  await purgeExpiredAll().catch(() => 0);   // 이력서 검토를 열 때마다 기한이 지난 결과를 정리해요
+  const list = await loadPostings(); const counts = {};
+  for (const p of list) { const n = (await loadResults(p.id)).length; if (n) counts[p.id] = n; }
+  res.json({ success: true, counts });
+}));
+app.put('/api/resume/results/:rid', ah(async (req, res) => {
+  const rid = String(req.params.rid || ''); const pid = String((req.body && req.body.positionId) || '');
+  if (!RESULT_ID_RE.test(rid) || !pid) return res.status(400).json({ error: '저장된 결과를 찾을 수 없어요.' });
+  const list = await loadResults(pid); const i = list.findIndex(x => x.rid === rid);
+  if (i < 0) return res.status(404).json({ error: '저장된 결과를 찾을 수 없어요.' });
+  const body = req.body || {};
+  if ('reg' in body) {   // 노션 기록 표시(요청에 reg가 있을 때만 바꿔요)
+    const reg = body.reg;
+    if (reg && typeof reg === 'object' && reg.id) list[i].reg = { id: String(reg.id).slice(0, 64), url: /^https?:\/\//.test(String(reg.url || '')) ? String(reg.url).slice(0, 300) : '' };
+    else list[i].reg = null;
+  }
+  if ('hired' in body) {   // 최종 합격(입사 확정) 표시: 인사서류로 보고 합격 확정일부터 N년 보관해요
+    const h = body.hired;
+    if (h === null || h === false) list[i].hired = null;
+    else {
+      const d = h && typeof h === 'object' ? String(h.date || '') : '';
+      if (!isIsoDay(d)) return res.status(400).json({ error: '합격 확정일은 YYYY-MM-DD 형식의 실제 날짜로 적어주세요.' });
+      if (d > todayKst()) return res.status(400).json({ error: '합격 확정일은 오늘이거나 지난 날짜여야 해요.' });
+      if (d < addDaysIso(todayKst(), -3650)) return res.status(400).json({ error: '합격 확정일이 너무 오래됐어요.' });
+      list[i].hired = { date: d };
+    }
+  }
+  await saveResults(pid, list);
+  res.json({ success: true });
+}));
+app.delete('/api/resume/results/:rid', ah(async (req, res) => {
+  const rid = String(req.params.rid || ''); const pid = String(req.query.positionId || '');
+  if (!RESULT_ID_RE.test(rid) || !pid) return res.status(400).json({ error: '저장된 결과를 찾을 수 없어요.' });
+  const list = await loadResults(pid); const next = list.filter(x => x.rid !== rid);
+  if (next.length === list.length) return res.status(404).json({ error: '저장된 결과를 찾을 수 없어요.' });
+  await saveResults(pid, next);
+  res.json({ success: true });
+}));
+app.delete('/api/resume/results', ah(async (req, res) => {
+  const pid = String(req.query.positionId || '');
+  if (!pid) return res.status(400).json({ error: '공고를 먼저 선택해주세요.' });
+  const all = await loadResults(pid); const kept = all.filter(x => x.hired);   // 합격자(인사서류)는 한꺼번에 지워지지 않게 남겨요. 지우려면 한 명씩 삭제하세요.
+  await saveResults(pid, kept);
+  res.json({ success: true, deleted: all.length - kept.length, keptHired: kept.length });
+}));
+
+// 보관 기간 설정·삭제 기록·자동 정리
+app.get('/api/resume/retention', ah(async (req, res) => {
+  const ret = await loadRetention(); const log = await storeGet('resume-purge-log', PURGE_LOG_PATH, []);
+  res.json({ success: true, days: ret.days, min: RETENTION_MIN_DAYS, max: RETENTION_MAX_DAYS, hiredYears: ret.hiredYears, hiredMin: HIRED_MIN_YEARS, hiredMax: HIRED_MAX_YEARS, confirmed: ret.confirmed, log: (Array.isArray(log) ? log : []).slice(0, 20) });
+}));
+app.put('/api/resume/retention', ah(async (req, res) => {
+  const b = req.body || {}; const ret = await loadRetention();
+  if (b.days !== undefined) {
+    const d = Number(b.days);
+    if (!Number.isInteger(d) || d < RETENTION_MIN_DAYS || d > RETENTION_MAX_DAYS) return res.status(400).json({ error: `보관 기간은 ${RETENTION_MIN_DAYS}~${RETENTION_MAX_DAYS}일 사이의 정수로 정해주세요(채용절차법의 반환 청구 기간 범위예요).` });
+    ret.days = d;
+  }
+  if (b.hiredYears !== undefined) {
+    const y = Number(b.hiredYears);
+    if (!Number.isInteger(y) || y < HIRED_MIN_YEARS || y > HIRED_MAX_YEARS) return res.status(400).json({ error: `합격자(인사서류) 보관 기간은 ${HIRED_MIN_YEARS}~${HIRED_MAX_YEARS}년 사이의 정수로 정해주세요.` });
+    ret.hiredYears = y;
+  }
+  if (b.positionId !== undefined) {
+    const pid = String(b.positionId || '');
+    if (!(await loadPostings()).some(x => x.id === pid)) return res.status(400).json({ error: '공고를 찾을 수 없어요.' });
+    const c = b.confirmedDate;
+    if (c === '' || c === null) delete ret.confirmed[pid];
+    else {
+      if (!isIsoDay(c)) return res.status(400).json({ error: '채용 여부 확정일은 YYYY-MM-DD 형식의 실제 날짜로 적어주세요.' });
+      if (c > addDaysIso(todayKst(), 365)) return res.status(400).json({ error: '채용 여부 확정일이 너무 먼 미래예요(오늘부터 1년 안으로 정해주세요).' });
+      ret.confirmed[pid] = c;
+    }
+  }
+  await saveRetention(ret);
+  const purged = await purgeExpiredAll().catch(() => 0);   // 기간을 줄이면 바로 적용해요
+  res.json({ success: true, days: ret.days, confirmed: ret.confirmed, purged });
+}));
+// 매일 자동 정리용 주소(Vercel 크론). 로그인 대신 CRON_SECRET이 맞아야만 실행돼요. CRON_SECRET을 안 정하면 이 주소는 닫혀 있어요.
+app.get('/api/cron/purge-results', ah(async (req, res) => {
+  const secret = String(process.env.CRON_SECRET || '');
+  const given = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!secret) return res.status(404).json({ error: 'not found' });
+  const a = Buffer.from(given), b = Buffer.from(secret);
+  if (a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) return res.status(401).json({ error: 'unauthorized' });
+  res.json({ success: true, deleted: await purgeExpiredAll() });
 }));
 
 // ---------- 노션 연동 (채용 지원자 DB) ----------
@@ -4369,6 +4594,9 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     const q = String(req.query.q || '').trim().slice(0, 50);
     const status = String(req.query.status || 'active').trim();
     const team = String(req.query.team || '').trim().slice(0, 50);
+    const monthRaw = String(req.query.month || '').trim();
+    const month = /^(20\d{2})-(0[1-9]|1[0-2])$/.test(monthRaw) ? monthRaw : '';   // 면접이 있는 달(YYYY-MM)
+    if (monthRaw && !month) return res.status(400).json({ error: '월은 YYYY-MM 형식(예: 2026-10)으로 골라주세요.' });
     const filters = [];
     if (q) filters.push({ property: '이름', title: { contains: q } });
     if (team) filters.push({ property: '팀명', select: { equals: team } });
@@ -4376,8 +4604,13 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     else if (status && status !== 'all') filters.push({ property: '면접상태', select: { equals: status } });
     const size = Math.max(1, Math.min(parseInt(req.query.pageSize, 10) || 30, 100));
     const cursor = String(req.query.cursor || '').slice(0, 200);
-    const body = { page_size: size, sorts: [{ timestamp: 'created_time', direction: 'descending' }] };
-    if (cursor) body.start_cursor = cursor;
+    if (month) {   // 노션 질의는 그 달 앞뒤 하루를 넉넉히 받고, 정확한 달 판정은 아래에서 서버가 해요(시간대 때문에 달 경계가 틀어지지 않게)
+      const [yy, mm] = month.split('-').map(Number); const pad = n => String(n).padStart(2, '0');
+      const from = new Date(Date.UTC(yy, mm - 1, 1) - 86400000).toISOString().slice(0, 10), to = new Date(Date.UTC(yy, mm, 1) + 86400000).toISOString().slice(0, 10);
+      filters.push({ or: ['면접일_1차', '면접일_2차'].map(pr => ({ and: [{ property: pr, date: { on_or_after: from } }, { property: pr, date: { on_or_before: to } }] })) });
+    }
+    const body = { page_size: month ? 100 : size, sorts: [{ timestamp: 'created_time', direction: 'descending' }] };
+    if (cursor && !month) body.start_cursor = cursor;
     if (filters.length === 1) body.filter = filters[0];
     else if (filters.length > 1) body.filter = { and: filters };
     const data = await notionRequest('POST', `/v1/databases/${NOTION_DB_ID}/query`, body);
@@ -4389,7 +4622,16 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
       const schedules = await loadSchedules();
       applicants = applicants.map(a => ({ ...a, scheduleCheck: compareSchedule(a, schedules) }));
     }
-    res.json({ applicants, hasMore: !!data.has_more, nextCursor: data.has_more ? (data.next_cursor || '') : '', scheduleChecked: String(req.query.schedule || '') === '1' && canSeeSchedules });
+    let byTeam = null;
+    if (month) {   // 그 달에 1차 또는 2차 면접이 있는 사람만 남기고, 그 달 안에서 가장 이른 면접일 순으로 정렬해요
+      // 노션 값이 어떤 시간대로 와도 한국 시간 기준으로 달을 판정해요(예: 9월 30일 23:30 +09:00은 9월, UTC로 14:30이어도 9월)
+      const kst = d => { const v = String(d || ''); if (!v) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const t = new Date(v); return isNaN(t) ? '' : t.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).replace(' ', 'T'); };
+      const inMonth = d => kst(d).slice(0, 7) === month;
+      const first = a => [a.interview1, a.interview2].filter(inMonth).map(kst).sort()[0] || '';
+      applicants = applicants.filter(a => first(a)).sort((x, y) => first(x).localeCompare(first(y)) || String(x.name).localeCompare(String(y.name), 'ko'));
+      byTeam = {}; for (const a of applicants) { const k = a.team || '(팀 없음)'; byTeam[k] = (byTeam[k] || 0) + [a.interview1, a.interview2].filter(inMonth).length; }   // 팀별 "면접 건수"(1차·2차를 각각 센 값)
+    }
+    res.json({ applicants, hasMore: !!data.has_more, nextCursor: !month && data.has_more ? (data.next_cursor || '') : '', scheduleChecked: String(req.query.schedule || '') === '1' && canSeeSchedules, month, byTeam, truncated: !!(month && data.has_more) });
   } catch (err) {
     sendNotionError(res, err);
   }
