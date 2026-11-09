@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-35';
+const APP_VERSION = '2026.10.21-36';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -4581,6 +4581,19 @@ document.getElementById('apThisMonth').addEventListener('click', () => { apMonth
 // 열은 노션 "면접상태" 선택지 순서 그대로예요(이 회사의 실제 상태 이름 — 앱이 이름을 만들어 넣지 않아요).
 // 카드를 옮기면 기존 상태 변경과 같은 길(apSave → 노션 PATCH, expectedEditedAt로 동시 수정 충돌 방지)로 저장해요.
 let apKanbanList = []; let apKanbanTruncated = false; let apKanbanLoading = false; let apKanbanDragId = '';
+// 칸반의 접힌 열: 진행 중이 아닌 상태(탈락 확정 845명처럼 많은 열)는 펼칠 때만 그 상태만 불러와요
+const AP_KB_BOARD = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정', '탈락 후보'];   // 서버의 status=board 와 같아요
+const AP_KB_COLUMN_MAX = 100;
+const apKbOpen = new Set(); let apKbExtra = {};   // 펼친 열 / 열별로 따로 불러온 지원자
+async function loadKanbanColumn(status, quiet) {
+  try {
+    const qs = new URLSearchParams({ status, team: apTeam.value || '', q: apSearch.value.trim(), pageSize: '100' });
+    const data = await apFetch('/api/notion/applicants?' + qs.toString());
+    const list = (data.applicants || []).slice(0, AP_KB_COLUMN_MAX);
+    apKbExtra[status] = { list, more: !!data.hasMore || (data.applicants || []).length > AP_KB_COLUMN_MAX };
+    list.forEach(x => { const i = apList.findIndex(v => v.id === x.id); if (i >= 0) apList[i] = x; else apList.push(x); });
+  } catch (err) { apKbExtra[status] = { list: [], more: false, error: err.message || '불러오지 못했어요.' }; if (!quiet) setApMsg(err.message || '불러오지 못했어요.', 'err'); }
+}
 async function loadKanban() {
   if (apKanbanLoading) return; apKanbanLoading = true;
   const board = document.getElementById('apKanbanBoard');
@@ -4591,12 +4604,13 @@ async function loadKanban() {
     setApMsg('노션에서 불러오는 중...');
     const all = []; let cursor = '', pages = 0, more = false;
     do {
-      const qs = new URLSearchParams({ status: 'all', team: apTeam.value || '', q: apSearch.value.trim() }); if (cursor) qs.set('cursor', cursor);
+      const qs = new URLSearchParams({ status: 'board', team: apTeam.value || '', q: apSearch.value.trim() }); if (cursor) qs.set('cursor', cursor);   // 처음에는 진행 중 열만(서류합격~탈락 후보). 탈락 확정·불참·퇴사·채용은 열을 펼칠 때 따로 불러와요
       const data = await apFetch('/api/notion/applicants?' + qs.toString());
       all.push(...data.applicants); cursor = data.nextCursor || ''; more = !!data.hasMore; pages++;
     } while (cursor && pages < 10);
     apKanbanList = all.slice(0, 300); apKanbanTruncated = more || all.length > 300;
     apKanbanList.forEach(x => { const i = apList.findIndex(v => v.id === x.id); if (i >= 0) apList[i] = x; else apList.push(x); });   // 문자 버튼과 apSave가 같은 지원자 정보를 찾게 합쳐 둬요
+    for (const s of [...apKbOpen]) await loadKanbanColumn(s, true);   // 펼쳐 둔 열은 새로 불러올 때 같이 갱신해요
     apRenderKanban(); setApMsg(apKanbanTruncated ? '지원자가 많아서 최근 300명까지만 보여요. 팀을 골라 나눠 보세요.' : '', apKanbanTruncated ? 'err' : '');
   } catch (err) { setApMsg(err.message || '불러오는 중 오류가 발생했어요.', 'err'); }
   finally { apKanbanLoading = false; }
@@ -4616,8 +4630,20 @@ function apRenderKanban() {
   const cols = apKanbanColumns(); const canMove = apCanEdit(); const by = new Map(cols.map(c => [c, []]));
   apKanbanList.forEach(x => by.get(x.status || '(상태 없음)').push(x));
   by.forEach(list => list.sort((p, q) => String(p.name).localeCompare(String(q.name), 'ko')));
-  document.getElementById('apKanbanSummary').innerHTML = apKanbanList.length ? `전체 <strong>${apKanbanList.length}명</strong> · ${cols.map(c => `${escapeHtml(c)} ${by.get(c).length}`).join(' · ')}` : '표시할 지원자가 없어요.';
-  document.getElementById('apKanbanBoard').innerHTML = cols.map(c => `<section class="ap-kb-col" role="group" aria-label="${escapeHtml(c)}" data-status="${escapeHtml(c)}"><h3>${escapeHtml(c)} <span class="ap-teamcount">${by.get(c).length}명</span></h3><div class="ap-kb-drop">${by.get(c).map(x => apKanbanCardHtml(x, cols, canMove)).join('') || '<p class="ap-sub ap-kb-empty">비어 있어요</p>'}</div></section>`).join('');
+  document.getElementById('apKanbanSummary').innerHTML = apKanbanList.length ? `전체 <strong>${apKanbanList.length}명</strong> · ${cols.filter(c => AP_KB_BOARD.includes(c) || c === '(상태 없음)').map(c => `${escapeHtml(c)} ${by.get(c).length}`).join(' · ')} · 탈락 확정 등 나머지 열은 펼칠 때 불러와요` : '표시할 지원자가 없어요.';
+  const collapsible = c => !AP_KB_BOARD.includes(c) && c !== '(상태 없음)';   // 진행 중이 아닌 상태는 접어 둬요
+  document.getElementById('apKanbanBoard').innerHTML = cols.map(c => {
+    if (collapsible(c)) {
+      const open = apKbOpen.has(c); const ex = apKbExtra[c];
+      const cards = open && ex ? ex.list.slice().sort((p, q) => String(p.name).localeCompare(String(q.name), 'ko')).map(x => apKanbanCardHtml(x, cols, canMove)).join('') : '';
+      const body = !open ? '<p class="ap-sub ap-kb-empty">접혀 있어요. "펼치기"를 누르면 이 상태의 지원자를 불러와요(최근 100명까지).</p>'
+        : !ex ? '<p class="ap-sub ap-kb-empty">불러오는 중...</p>'
+        : ex.error ? `<p class="ap-sub ap-kb-empty">${escapeHtml(ex.error)}</p>`
+        : (cards || '<p class="ap-sub ap-kb-empty">비어 있어요</p>') + (ex.more ? `<p class="ap-sub ap-kb-empty">최근 ${AP_KB_COLUMN_MAX}명까지만 보여요. 팀이나 이름으로 좁혀 보세요.</p>` : '');
+      return `<section class="ap-kb-col ap-kb-collapsed${open ? ' open' : ''}" role="group" aria-label="${escapeHtml(c)}" data-status="${escapeHtml(c)}"><h3>${escapeHtml(c)} <button type="button" class="link-btn ap-kb-toggle" data-status="${escapeHtml(c)}">${open ? '접기' : '펼치기'}</button></h3><div class="ap-kb-drop">${body}</div></section>`;
+    }
+    return `<section class="ap-kb-col" role="group" aria-label="${escapeHtml(c)}" data-status="${escapeHtml(c)}"><h3>${escapeHtml(c)} <span class="ap-teamcount">${by.get(c).length}명</span></h3><div class="ap-kb-drop">${by.get(c).map(x => apKanbanCardHtml(x, cols, canMove)).join('') || '<p class="ap-sub ap-kb-empty">비어 있어요</p>'}</div></section>`;
+  }).join('');
 }
 // 카드를 다른 상태로 옮겨요(끌어놓기·이동 선택칸이 같이 써요). 실패하면 원래 자리로 돌아가요.
 async function apKanbanMove(id, next) {
@@ -4647,6 +4673,10 @@ async function apKanbanMove(id, next) {
   board.addEventListener('dragover', e => { const col = e.target.closest('.ap-kb-col'); if (!col || !apKanbanDragId) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; board.querySelectorAll('.ap-kb-over').forEach(el => { if (el !== col) el.classList.remove('ap-kb-over'); }); col.classList.add('ap-kb-over'); });
   board.addEventListener('drop', e => { const col = e.target.closest('.ap-kb-col'); if (!col || !apKanbanDragId) return; e.preventDefault(); const id = apKanbanDragId; apKanbanDragId = ''; col.classList.remove('ap-kb-over'); apKanbanMove(id, col.dataset.status); });
   board.addEventListener('change', e => { const sel = e.target.closest('select.ap-kb-move'); if (!sel || !sel.value) return; const v = sel.value; sel.value = ''; apKanbanMove(sel.dataset.id, v); });
+  board.addEventListener('click', async e => {
+    const t = e.target.closest('.ap-kb-toggle');
+    if (t) { const s = t.dataset.status; if (apKbOpen.has(s)) { apKbOpen.delete(s); } else { apKbOpen.add(s); apKbExtra[s] = undefined; apRenderKanban(); await loadKanbanColumn(s); } apRenderKanban(); }
+  });
   board.addEventListener('click', e => { const b = e.target.closest('.ap-kb-sms'); if (!b) return; const x = apList.find(v => v.id === b.dataset.id); if (x) fillSendFormFromNotion(x); });
 }
 

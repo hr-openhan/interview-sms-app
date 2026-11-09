@@ -2149,3 +2149,7 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .sch-orab-label { flex: 0 0 38px; color: #7a7466; }
 .sch-orab-value { flex: 1 1 160px; word-break: keep-all; overflow-wrap: anywhere; }
 .sch-orab-msg { margin: 4px 0 0; min-height: 0; }
+
+/* 칸반 접힌 열 */
+.ap-kb-collapsed:not(.open) { opacity: .85; }
+.ap-kb-collapsed h3 .link-btn { font-size: 12px; margin-left: 6px; }
