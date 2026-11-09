@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-38">
+<html lang="ko" data-app-version="2026.10.21-39">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -334,6 +334,22 @@
         <div class="preview-head">
           <span class="preview-label">이력서 평가</span>
         </div>
+        <details class="rubric-box link-posting-box" id="linkBox" data-edit="resume">
+          <summary>🔗 공고 링크로 공고 올리기 (사람인·잡코리아)</summary>
+          <p class="manage-hint">사람인·잡코리아 공고 주소를 붙여넣으면 글을 읽어 공고로 올리고, 아래 "평가할 공고"에서 바로 이 공고로 이력서 점수를 매길 수 있어요. 팀은 직접 골라주세요.</p>
+          <div class="link-row">
+            <select id="linkTeam" aria-label="공고 팀"></select>
+            <input id="linkUrl" type="url" placeholder="https://www.saramin.co.kr/... 또는 https://www.jobkorea.co.kr/..." autocomplete="off" />
+            <button type="button" id="linkReadBtn" class="add-btn">공고 읽어오기</button>
+          </div>
+          <div id="linkPasteBox" class="link-paste" hidden>
+            <input id="linkPosition" type="text" maxlength="100" placeholder="포지션 이름 (예: 온라인 MD)" autocomplete="off" />
+            <textarea id="linkText" rows="8" placeholder="공고 글을 복사해서 붙여넣어 주세요 (주요업무·자격요건·우대사항·근무조건 같은 제목이 있으면 자동으로 나눠요)"></textarea>
+            <button type="button" id="linkPasteBtn" class="add-btn">붙여넣은 글로 올리기</button>
+          </div>
+          <p id="linkStatus" class="status" aria-live="polite"></p>
+          <div id="linkList" class="link-list"></div>
+        </details>
         <div class="field">
           <label for="evalPositionSelect">평가할 공고 (확정된 공고만 보여요)</label>
           <select id="evalPositionSelect"></select>

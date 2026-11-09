@@ -2159,3 +2159,15 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 .tpl-card-actions .sch-save-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tpl-card-actions .sch-delete-btn { color: var(--danger); }
 .tpl-card-actions .sch-delete-btn:hover { background: #f8e9e7; }
+
+/* 공고 링크로 올리기 */
+.link-posting-box { margin-bottom: 12px; }
+.link-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.link-row input[type="url"] { flex: 1 1 280px; min-width: 0; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.link-row select { font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.link-paste { display: grid; gap: 8px; margin: 8px 0; }
+.link-paste input, .link-paste textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); width: 100%; box-sizing: border-box; }
+.link-list { margin-top: 10px; }
+.link-list-title { display: block; margin-bottom: 6px; }
+.link-item { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
+.link-item-actions { display: flex; gap: 10px; align-items: center; }

@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-38';
+const APP_VERSION = '2026.10.21-39';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -1795,11 +1795,60 @@ function updatePositionHint() {
 }
 
 // --- 평가할 공고 선택 (확정된 공고만, 팀별로 묶어서) ---
+// ---------- 공고 링크(사람인·잡코리아)로 공고 올리기 ----------
+const linkTeamEl = document.getElementById('linkTeam'), linkUrlEl = document.getElementById('linkUrl'), linkStatusEl = document.getElementById('linkStatus');
+const linkPasteBox = document.getElementById('linkPasteBox'), linkListEl = document.getElementById('linkList');
+function setLinkStatus(msg, cls) { linkStatusEl.textContent = msg || ''; linkStatusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+function renderLinkBox() {
+  const keep = linkTeamEl.value;
+  linkTeamEl.innerHTML = '<option value="">팀 선택</option>' + postTeams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  if (postTeams.includes(keep)) linkTeamEl.value = keep;
+  const links = postingsAll.filter(p => p.source === 'link');
+  linkListEl.innerHTML = links.length ? '<strong class="link-list-title">링크로 올린 공고</strong>' + links.map(p => {
+    const ch = (p.channels || [])[0] || {};
+    const meta = [p.team, ch.postedAt ? `공고일 ${ch.postedAt}` : '', p.applyEnd ? `접수 마감 ${p.applyEnd}` : '', p.career, p.education].filter(Boolean).join(' · ');
+    return `<div class="link-item" data-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.position)}</strong><div class="ap-sub">${escapeHtml(meta)}</div></div><div class="link-item-actions"><button type="button" class="link-btn link-pick" data-id="${escapeHtml(p.id)}">이 공고로 점수 매기기</button>${/^https?:\/\//.test(ch.url || '') ? `<a class="link-btn" href="${escapeHtml(ch.url)}" target="_blank" rel="noopener noreferrer">원문</a>` : ''}</div></div>`;
+  }).join('') : '';
+}
+function linkSelectPosting(id, msg) {
+  renderEvalOptions();
+  if (id && [...evalPositionSelect.options].some(o => o.value === id)) { evalPositionSelect.value = id; evalPositionSelect.dispatchEvent(new Event('change')); }
+  setLinkStatus(msg, 'ok');
+}
+async function linkSubmit(withText) {
+  const team = linkTeamEl.value, url = linkUrlEl.value.trim();
+  if (!team) { setLinkStatus('팀을 먼저 골라주세요.', 'err'); return; }
+  if (!url) { setLinkStatus('공고 주소를 붙여넣어 주세요.', 'err'); return; }
+  const body = { team, url };
+  if (withText) { body.text = document.getElementById('linkText').value; body.position = document.getElementById('linkPosition').value; }
+  const btn = withText ? document.getElementById('linkPasteBtn') : document.getElementById('linkReadBtn'); btn.disabled = true;
+  setLinkStatus(withText ? '붙여넣은 글을 정리하는 중...' : '공고 페이지를 읽는 중... (최대 20초)');
+  try {
+    const res = await fetch('/api/postings/from-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok && j.success) {
+      await loadResumeData();
+      const p = j.posting; const n = j.note || {};
+      linkSelectPosting(p.id, `"${p.position}" 공고를 올렸어요${n.postedAt ? ` (공고일 ${n.postedAt})` : ''}. 위 "평가할 공고"로 골라 뒀으니, 아래에서 이력서 PDF를 올리면 이 공고 기준으로 점수를 매겨요.${n.usedAll ? ' (공고에서 업무·자격요건 제목을 못 찾아 전체 글을 요건으로 넣었어요. 점수는 전체 글을 보고 매겨요.)' : ''}`);
+      linkUrlEl.value = ''; linkPasteBox.hidden = true; document.getElementById('linkText').value = ''; document.getElementById('linkPosition').value = '';
+    } else if (res.status === 409 && j.existingId) {
+      await loadResumeData(); linkSelectPosting(j.existingId, '이미 올린 공고예요. 그 공고를 "평가할 공고"로 골라 뒀어요.');
+    } else {
+      linkPasteBox.hidden = !(j.needPaste || j.needPosition);
+      setLinkStatus(j.error || '공고를 올리지 못했어요.', 'err');
+    }
+  } catch { setLinkStatus('서버에 연결하지 못했어요. 잠시 뒤 다시 시도해주세요.', 'err'); }
+  finally { btn.disabled = false; }
+}
+document.getElementById('linkReadBtn').addEventListener('click', () => linkSubmit(false));
+document.getElementById('linkPasteBtn').addEventListener('click', () => linkSubmit(true));
+linkListEl.addEventListener('click', e => { const b = e.target.closest('.link-pick'); if (b) linkSelectPosting(b.dataset.id, '이 공고를 "평가할 공고"로 골라 뒀어요. 아래에서 이력서 PDF를 올리세요.'); });
+
 function renderEvalOptions() {
   const keep = evalPositionSelect.value;
-  const confirmed = postingsAll.filter(p => p.status === 'confirmed');
+  const confirmed = scorablePostings();
   if (!confirmed.length) {
-    evalPositionSelect.innerHTML = '<option value="">확정된 공고가 없어요 — 공고를 확정해야 여기에 나와요</option>';
+    evalPositionSelect.innerHTML = (postingCreateOn() ? '<option value="">확정된 공고가 없어요 — 공고를 확정해야 여기에 나와요</option>' : '<option value="">공고가 없어요 — 위 "공고 링크로 공고 올리기"에 사람인·잡코리아 공고 주소를 붙여넣어 주세요</option>');
     renderEvalDraftNote();
     return;
   }
@@ -1811,11 +1860,12 @@ function renderEvalOptions() {
   if (confirmed.some(p => p.id === keep)) evalPositionSelect.value = keep;
   renderEvalDraftNote();
   if (typeof batchDecorateSelect === 'function') batchDecorateSelect();   // "· 저장된 결과 N명" 표시
+  if (typeof renderLinkBox === 'function') renderLinkBox();   // 링크로 올린 공고 목록과 팀 선택지도 같이 갱신해요
 }
 // 확정하지 않은 공고는 평가 목록에 안 나와요. 어느 공고가 왜 안 보이는지와 확정하러 가는 길을 알려줘요.
 function renderEvalDraftNote() {
   const box = document.getElementById('evalDraftNote'); if (!box) return;
-  const drafts = postingsAll.filter(p => p.status !== 'confirmed');
+  const drafts = postingCreateOn() ? postingsAll.filter(p => p.status !== 'confirmed') : [];   // 공고 만들기가 숨겨져 있으면 작성 중인 공고 안내도 안 보여요
   if (!drafts.length) { box.hidden = true; box.innerHTML = ''; return; }
   const names = drafts.slice(0, 4).map(p => escapeHtml(p.position + (p.brand ? ` [${p.brand}]` : ''))).join(', ') + (drafts.length > 4 ? ` 외 ${drafts.length - 4}개` : '');
   box.hidden = false;
@@ -4061,6 +4111,8 @@ function renderLeadNote() {
   if (lead) el.textContent = `${(ME.teams || []).join('·')} 면접 기록만 보여요(보기 전용). 다른 팀과 수정·문자 발송은 소유주에게 요청해주세요.`;
 }
 // 공고 만들기 화면을 보여줄지(서버 환경변수 SHOW_POSTING_CREATE=1 일 때만). 숨겨도 코드와 저장된 공고는 그대로예요
+// 이력서 점수의 기준으로 고를 수 있는 공고: 공고 만들기가 숨겨진 상태(기본)에서는 "링크로 올린 공고"만이에요(예전에 만든 공고는 지우지 않고 안 보이게만 둬요). 공고 만들기가 켜져 있으면 확정된 공고 모두예요.
+function scorablePostings() { return postingsAll.filter(p => p.status === 'confirmed' && (postingCreateOn() || p.source === 'link')); }
 function postingCreateOn() { return !!(ME.features && ME.features.postingCreate); }
 function applyPermissions() {
   document.body.classList.toggle('no-posting-create', !postingCreateOn());
@@ -4739,7 +4791,7 @@ async function batchReadAppliedAll() {
 }
 // 확정된 공고 중 지원분야와 비슷한 순서(단어가 겹치는 정도). 동점이면 모두 "비슷해요"로 표시하고, 고르는 건 사람이에요.
 function batchPostingChoices(applied) {
-  const confirmed = postingsAll.filter(p => p.status === 'confirmed');
+  const confirmed = scorablePostings();
   const toks = s => new Set(String(s || '').split(/[^0-9A-Za-z가-힣]+/).filter(t => t.length >= 2));
   const A = toks(applied);
   const scored = confirmed.map(p => { const P = toks(`${p.team} ${p.position} ${p.brand || ''}`); let n = 0; A.forEach(t => { if (P.has(t) || [...P].some(x => x.includes(t) || t.includes(x))) n++; }); return { p, n }; });
@@ -4765,7 +4817,7 @@ function batchRenderAppliedBox() {
   const reading = batchRows.filter(r => r.appliedState === 'reading').length;
   const groups = batchAppliedGroups();
   if (!groups.length && !reading) { box.hidden = true; box.innerHTML = ''; return; }
-  if (!postingsAll.some(p => p.status === 'confirmed')) { box.hidden = true; box.innerHTML = ''; return; }
+  if (!scorablePostings().length) { box.hidden = true; box.innerHTML = ''; return; }
   box.hidden = false;
   box.innerHTML = `<div class="manage-hint" style="margin:0 0 6px"><strong>지원분야별 분류</strong> — 이력서에 적힌 "지원분야"를 읽어 같은 것끼리 묶었어요. 묶음마다 어느 공고인지 <strong>직접 골라주세요</strong>(자동으로 정하지 않아요). 고르지 않은 이력서는 위 "평가할 공고"로 평가해요.${reading ? ` <span class="batch-reading">(읽는 중… ${reading}개)</span>` : ''}</div>`
     + groups.map(g => { const sel = new Set(g.rows.map(r => r.preId || '')); const common = sel.size === 1 ? [...sel][0] : '';
@@ -4892,7 +4944,7 @@ function batchRender() {
       cells = `<td data-label="총점"><strong>${r.total}</strong></td><td data-label="검토 우선순위">${escapeHtml(r.recommendation)}</td><td data-label="필수 요건">${escapeHtml(c.reqText)}</td><td data-label="확인 필요">${c.low ? c.low + '개 영역' : '-'}</td>`;
     } else if (row.state === 'run') cells = '<td colspan="4" class="batch-state">AI가 평가하는 중... (최대 1분)</td>';
     else if (row.state === 'err') cells = `<td colspan="4" class="batch-err">${escapeHtml(row.error)}${row.appliedFor ? `<div class="manage-hint batch-applied-line">이력서의 지원분야: <strong>${escapeHtml(row.appliedFor)}</strong></div>` : ''}</td>`;
-    else cells = `<td colspan="4" class="batch-state">대기 중 (아직 점수를 안 봤어요)${row.appliedState === 'reading' ? '<div class="manage-hint batch-applied-line">지원분야를 읽는 중…</div>' : `<div class="manage-hint batch-applied-line">이력서의 지원분야: ${row.appliedFor ? '<strong>' + escapeHtml(row.appliedFor) + '</strong>' : '못 읽었어요'}</div>`}${row.file && !(row.reg && row.reg.id) && postingsAll.some(p => p.status === 'confirmed') ? batchPostingSelectHtml(row, 'batch-row-sel') : ''}</td>`;
+    else cells = `<td colspan="4" class="batch-state">대기 중 (아직 점수를 안 봤어요)${row.appliedState === 'reading' ? '<div class="manage-hint batch-applied-line">지원분야를 읽는 중…</div>' : `<div class="manage-hint batch-applied-line">이력서의 지원분야: ${row.appliedFor ? '<strong>' + escapeHtml(row.appliedFor) + '</strong>' : '못 읽었어요'}</div>`}${row.file && !(row.reg && row.reg.id) && scorablePostings().length ? batchPostingSelectHtml(row, 'batch-row-sel') : ''}</td>`;
     const reg = row.reg && row.reg.id ? `<span class="batch-badge">서류 합격 확정됨</span>` : '';
     const pick = row.state === 'ok' && !(row.reg && row.reg.id) ? `<label class="check-chip batch-pick-chip"><input type="checkbox" class="batch-pick"${row.picked ? ' checked' : ''}${row.recording ? ' disabled' : ''} /> 선정</label> ` : '';
     const btns = row.state === 'ok'
