@@ -203,6 +203,8 @@ const GOOGLE_TOKEN_URL = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googlea
 const USERS_CACHE_MS = process.env.USERS_CACHE_MS !== undefined ? Number(process.env.USERS_CACHE_MS) : 10000;
 
 // 메뉴(권한 단위)와 권한 단계
+// 공고 만들기 화면은 정비 전이라 기본으로 숨겨요(코드·서버 기능·저장된 공고는 그대로예요). 다시 켜려면 환경변수 SHOW_POSTING_CREATE=1
+const SHOW_POSTING_CREATE = process.env.SHOW_POSTING_CREATE === '1';
 const MENUS = [
   { key: 'send', label: '문자 보내기' },
   { key: 'history', label: '발송 이력' },
@@ -339,7 +341,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-36';
+const APP_VERSION = '2026.10.21-38';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -514,7 +516,7 @@ app.get('/api/me', ah(async (req, res) => {
   const u = a.user;
   res.json({
     mode: AUTH_MODE, authed: true, version: APP_VERSION,
-    email: u.email, name: u.name, role: u.role, perms: u.perms, teams: u.teams || null,
+    email: u.email, name: u.name, role: u.role, perms: u.perms, teams: u.teams || null, features: { postingCreate: SHOW_POSTING_CREATE },
     canManage: AUTH_MODE === 'google' && u.role === 'owner',
     menus: MENUS,
   });
