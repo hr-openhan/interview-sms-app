@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-45';
+const APP_VERSION = '2026.10.21-49';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -206,7 +206,38 @@ let schedules = [];
     } catch { alert('서버에 연결하지 못했어요.'); } finally { btn.disabled = false; }
   });
 })();
-async function loadTemplates() {
+// ---------- 채용과제 양식(양식 관리) ----------
+let taskList = [];
+async function loadTasks() {
+  try { const r = await fetch('/api/tasks'); const j = await r.json().catch(() => ({})); taskList = r.ok ? (j.tasks || []) : []; } catch { taskList = []; }
+  renderTaskList(); return taskList;
+}
+function renderTaskList() {
+  const el = document.getElementById('taskList'); if (!el) return; const can = canEdit('templates') || canEdit('resume');
+  el.innerHTML = taskList.length ? `<ul class="task-items">${taskList.map(t => `<li data-id="${escapeHtml(t.id)}"><strong>${escapeHtml(t.title)}</strong> <span class="ap-sub">${escapeHtml([t.team, t.job, `기한 ${t.days}일`].filter(Boolean).join(' · '))}</span>${can ? ` <button type="button" class="link-btn task-edit">수정</button> <button type="button" class="link-btn task-del">삭제</button>` : ''}<div class="ap-sub task-body">${escapeHtml(t.body.slice(0, 160))}${t.body.length > 160 ? '…' : ''}</div></li>`).join('')}</ul>` : '<p class="ap-sub">아직 과제 양식이 없어요.</p>';
+}
+function taskFormOpen(t) {
+  const f = document.getElementById('taskForm'); f.hidden = false; document.getElementById('taskAdd').hidden = true; document.getElementById('taskMsg').textContent = '';
+  document.getElementById('taskId').value = t ? t.id : ''; document.getElementById('taskTitle').value = t ? t.title : ''; document.getElementById('taskTeam').value = t ? t.team : ''; document.getElementById('taskJob').value = t ? t.job : '';
+  document.getElementById('taskDays').value = t ? t.days : 7; document.getElementById('taskBody').value = t ? t.body : ''; document.getElementById('taskMethod').value = t ? t.method : 'job@openhan.kr로 메일 제출'; document.getElementById('taskTitle').focus();
+}
+function taskFormClose() { document.getElementById('taskForm').hidden = true; document.getElementById('taskAdd').hidden = !(canEdit('templates') || canEdit('resume')); }
+document.getElementById('taskAdd').addEventListener('click', () => taskFormOpen(null));
+document.getElementById('taskCancel').addEventListener('click', taskFormClose);
+document.getElementById('taskSave').addEventListener('click', async () => {
+  const id = document.getElementById('taskId').value; const body = { title: document.getElementById('taskTitle').value, team: document.getElementById('taskTeam').value, job: document.getElementById('taskJob').value, days: Number(document.getElementById('taskDays').value), body: document.getElementById('taskBody').value, method: document.getElementById('taskMethod').value };
+  const r = await fetch(id ? '/api/tasks/' + encodeURIComponent(id) : '/api/tasks', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json().catch(() => ({}));
+  if (!r.ok) { document.getElementById('taskMsg').textContent = j.error || '저장하지 못했어요.'; return; }
+  taskFormClose(); await loadTasks();
+});
+document.getElementById('taskList').addEventListener('click', async e => {
+  const li = e.target.closest('li[data-id]'); if (!li) return; const t = taskList.find(x => x.id === li.dataset.id); if (!t) return;
+  if (e.target.closest('.task-edit')) taskFormOpen(t);
+  if (e.target.closest('.task-del')) { if (!confirm(`"${t.title}" 과제 양식을 지울까요? 이미 지원자에게 낸 과제 기록은 그대로 남아요.`)) return; await fetch('/api/tasks/' + encodeURIComponent(t.id), { method: 'DELETE' }); await loadTasks(); }
+});
+let tplLoading = null;   // 양식 불러오기가 겹치면 같은 요청을 기다려요(늦게 끝난 요청이 고른 양식을 지우지 않게)
+function loadTemplates() { if (!tplLoading) tplLoading = loadTemplatesNow().finally(() => { tplLoading = null; }); return tplLoading; }
+async function loadTemplatesNow() {
   if (!canView('send') && !canView('templates')) return;
   templateSelect.innerHTML = '<option value="">불러오는 중...</option>';
   try {
@@ -749,20 +780,21 @@ function showTab(tab) {
   tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.dataset.group === 'manage' && (tab === 'resume' || tab === 'posting'))));
   document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === tab));
   sendView.hidden = tab !== 'send';
-  document.body.classList.toggle('wide-tab', tab === 'interview');   // 면접 관리는 화면 가로 폭을 넓게 써요(목록·칸반이 한눈에 보이게)
+  document.body.classList.toggle('wide-tab', tab === 'interview');
+  if (tab === 'manage') loadTasks();   // 채용과제 양식도 함께 보여줘요   // 면접 관리는 화면 가로 폭을 넓게 써요(목록·칸반이 한눈에 보이게)
   resumeView.hidden = tab !== 'resume';
   postingView.hidden = tab !== 'posting';
   interviewView.hidden = tab !== 'interview';
   manageView.hidden = tab !== 'manage';
   if (tab === 'manage') refreshTemplateManageSelect();
   if (tab === 'resume' || tab === 'posting') loadResumeData();
-  if (tab === 'interview') loadApplicants(true);   // 면접 관리 = 노션 지원자 목록(예전 지원자 관리) + 면접 질문·답변
+  if (tab === 'interview' && apView !== 'sched') loadApplicants(true);   // 면접 관리 = 노션 지원자 목록(예전 지원자 관리) + 면접 질문·답변
   if (tab === 'send') loadTemplates(); // 양식 변경사항 반영
 }
 
 let lastManageTab = 'resume';
 tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => showTab(btn.dataset.group === 'manage' ? lastManageTab : btn.dataset.tab));
+  btn.addEventListener('click', () => { showTab(btn.dataset.group === 'manage' ? lastManageTab : btn.dataset.tab); if (btn.dataset.tab === 'interview' && typeof apView !== 'undefined' && apView === 'sched') apSetView('list'); });   // 위의 면접 탭을 누르면 지원자 목록부터 보여요
 });
 document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.addEventListener('click', () => showTab(b.dataset.sub)));
 
@@ -3966,7 +3998,7 @@ function fillScheduleFormFromNotion(a) {
     if (m[4]) { schHourInput.value = String(Number(m[4])); schMinuteInput.value = String(Number(m[5])); }
   }
   closeNotionModal();
-  showTab('send');
+  openScheduleView();   // 일정 등록은 이제 면접 화면의 "일정 등록·목록"에 있어요
   schNameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
   (schHourInput.value === '' ? schHourInput : schLocationInput).focus();
 }
@@ -4254,6 +4286,7 @@ async function bootApp() {
     initDock();
     if (first) showTab(first);
     lnRefresh();   // 노션 → 앱 옮기기 상자(소유주·노션 모드일 때만)
+    todayLoad(); setInterval(() => { if (!document.hidden) todayLoad(); }, 5 * 60 * 1000);   // 오늘 할 일
     if (canView('history')) loadHistory();
     if (canView('schedule')) { loadTeams(); loadInterviewers(); loadLocations(); loadRounds(); loadSchedules(); }
   } finally {
@@ -4476,18 +4509,41 @@ async function apdFetchNote(id) {
 async function lnRefresh() {
   const box = document.getElementById('lnBox'); if (!box) return;
   if (!(ME.role === 'owner' || ME.role === 'full')) { box.hidden = true; return; }
-  try { const r = await fetch('/api/data-source'); const d = await r.json(); box.hidden = !(r.ok && d.mode !== 'local' && d.notionToken && !d.envForced); if (d.progress) document.getElementById('lnProg').textContent = `지난번에 ${d.progress.pages}명까지 옮겼어요. 누르면 이어서 옮겨요.`; } catch { box.hidden = true; }
+  const done = document.getElementById('lnDone'); done.hidden = true;
+  try {
+    const r = await fetch('/api/data-source'); const d = await r.json();
+    box.hidden = !(r.ok && d.mode !== 'local' && d.notionToken && !d.envForced); if (d.progress) document.getElementById('lnProg').textContent = `지난번에 ${d.progress.pages}명까지 옮겼어요. 누르면 이어서 옮겨요.`;
+    document.getElementById('lnToApp').hidden = !(d.importedAt && d.mode !== 'local'); document.getElementById('lnStart').hidden = !!(d.importedAt && d.mode !== 'local');
+    if (r.ok && d.mode === 'local' && d.importedAt && !d.envForced) {   // 옮긴 뒤: 결과와 되돌리기(노션 토큰이 남아 있을 때만)
+      const c = d.counts || {}; done.hidden = false;
+      document.getElementById('lnDoneText').textContent = `앱 저장소 사용 중 · ${String(d.importedAt).slice(0, 10)}에 ${c.pages || 0}명, 면접 문항 표 ${c.dbs || 0}개, 서류 PDF ${c.files || 0}개를 옮겼어요${c.fileErrors ? ` (PDF ${c.fileErrors}명분은 옮기지 못했어요)` : ''}${d.fileStore === 'none' ? ' · 파일 창고가 없어 PDF 원본은 저장되지 않았어요' : ''}.`;
+      document.getElementById('lnToNotion').hidden = !d.notionToken;
+    }
+  } catch { box.hidden = true; }
 }
+document.getElementById('lnToNotion').addEventListener('click', async () => {
+  if (!confirm('노션으로 되돌릴까요?\n\n앱 저장소로 옮긴 뒤 앱에서 바꾼 내용(상태·면접 기록 답변 등)은 노션에 없어요. 다시 앱 저장소로 바꾸면 그 내용이 돌아와요.')) return;
+  const r = await fetch('/api/data-source/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'notion' }) }); const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || '되돌리지 못했어요.'); return; } notionStatus = null; location.reload();
+});
+document.getElementById('lnToApp').addEventListener('click', async () => {
+  if (!confirm('옮겨 둔 앱 저장소로 다시 바꿀까요? 노션에서 그 사이 바뀐 내용은 들어오지 않아요.')) return;
+  const r = await fetch('/api/data-source/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'app' }) }); const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || '바꾸지 못했어요.'); return; } notionStatus = null; location.reload();
+});
 document.getElementById('lnStart').addEventListener('click', async () => {
   const btn = document.getElementById('lnStart'), prog = document.getElementById('lnProg');
-  if (!confirm('노션의 지원자 정보를 앱으로 옮길까요?\n옮긴 뒤에는 앱 저장소만 써요. 노션 내용은 지우지 않아요.')) return;
-  btn.disabled = true;
+  btn.disabled = true; prog.textContent = '노션에서 옮길 인원을 세는 중...';
+  let pv = null; try { const r0 = await fetch('/api/data-source/preview'); pv = await r0.json().catch(() => null); if (!r0.ok) { prog.textContent = (pv && pv.error) || '노션을 읽지 못했어요.'; btn.disabled = false; return; } } catch { prog.textContent = '서버에 연결하지 못했어요.'; btn.disabled = false; return; }
+  const by = Object.entries(pv.byStatus || {}).map(([k, v]) => `${k} ${v}명`).join(', ');
+  prog.textContent = '';
+  if (!confirm(`노션의 지원자 ${pv.people}명을 앱으로 옮길까요?\n(${by || '없음'})\n\n먼저 노션 워크스페이스 전체 내보내기로 백업했는지 확인해주세요.\n옮긴 뒤에는 앱 저장소만 써요. 노션 내용은 지우지 않고, 문제가 있으면 "노션으로 되돌리기"로 돌아갈 수 있어요.`)) { btn.disabled = false; return; }
   try {
     for (let i = 0; i < 400; i++) {
       const r = await fetch('/api/data-source/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const d = await r.json().catch(() => ({}));
       if (!r.ok) { prog.textContent = d.error || '옮기지 못했어요. 다시 누르면 이어서 옮겨요.'; return; }
       prog.textContent = `옮기는 중... ${d.counts ? d.counts.pages : 0}명`;
-      if (d.done) { prog.textContent = `다 옮겼어요: ${d.counts.pages}명, 면접 문항 표 ${d.counts.dbs}개. 이제 노션 없이 동작해요.`; notionStatus = null; setTimeout(() => location.reload(), 1500); return; }
+      if (d.done) { prog.textContent = `다 옮겼어요: ${d.counts.pages}명, 면접 문항 표 ${d.counts.dbs}개, 서류 PDF ${d.counts.files || 0}개. 이제 노션 없이 동작해요.`; notionStatus = null; setTimeout(() => location.reload(), 1500); return; }
     }
   } catch { prog.textContent = '서버에 연결하지 못했어요. 다시 누르면 이어서 옮겨요.'; } finally { btn.disabled = false; }
 });
@@ -4499,6 +4555,9 @@ async function openApplicantDetail(id) {
   document.getElementById('apdInfo').innerHTML = apdInfoHtml(x); document.getElementById('apdCard').textContent = '불러오는 중...'; document.getElementById('apdNotes').innerHTML = ''; document.getElementById('apdComments').innerHTML = ''; apdMsg('');
   const lead = ME.role === 'teamlead'; const note = document.getElementById('apdLeadNote'); note.hidden = !(lead || !apCanEdit()); note.textContent = lead ? `${(ME.teams || []).join('·')} 면접 대상자만 보여요. 면접 내용과 의견 댓글을 쓸 수 있어요.` : '보기 전용이에요(수정 권한이 없어요).';
   apdEl.hidden = false; document.body.classList.add('apd-open'); document.getElementById('apdClose').focus();
+  apdIvUnmount(); document.getElementById('apdDocMsg').textContent = ''; document.getElementById('apdDocUpLabel').hidden = !(apCanEdit() || ME.role === 'teamlead');
+  apdShowPane('notes'); document.getElementById('apdTaskTabSub').textContent = '';
+  apdRenderActions(); apdLoadDocs(id); apdLoadTask(id); apdLoadScore(id);
   try { apd.note = await apdFetchNote(id); apdRenderNotes(); } catch (err) { apdMsg(err.message, 'err'); }
   apd.loading = false;
   try {   // 이력서 평가 요약·학력·경력은 노션 카드에서 읽어와요(못 읽어도 위의 정보와 면접 기록은 그대로 써요)
@@ -4510,8 +4569,154 @@ async function openApplicantDetail(id) {
     card.innerHTML = [ap.education ? `<div><strong>학력</strong> ${escapeHtml(ap.education)}</div>` : '', ap.career ? `<div><strong>주요 경력</strong> ${escapeHtml(ap.career)}</div>` : '', ap.summary ? `<div class="apd-summary"><strong>평가 요약</strong><div>${escapeHtml(ap.summary)}</div></div>` : ''].join('') || '이력서 평가 내용이 없어요.';
   } catch { if (apd.id === id) document.getElementById('apdCard').textContent = '이력서 평가를 불러오지 못했어요.'; }
 }
+// 지원자 페이지 왼쪽: 이력서·포트폴리오·자격증 등 서류(누르면 원본 PDF가 새 창으로 열려요)
+async function apdLoadDocs(id) {
+  const box = document.getElementById('apdDocs'); box.textContent = '불러오는 중...';
+  try {
+    const r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/docs'); const j = await r.json().catch(() => ({}));
+    if (apd.id !== id) return;
+    if (!r.ok) { box.textContent = j.error || '서류를 불러오지 못했어요.'; return; }
+    const docs = j.docs || [];
+    box.innerHTML = (j.note ? `<div class="manage-hint">${escapeHtml(j.note)}</div>` : '') + (docs.length ? `<ul class="apd-docs">${docs.map(d => `<li><span class="batch-kind">${escapeHtml(d.kind || '기타')}</span> ${d.hasFile ? `<a href="/api/applicants/${encodeURIComponent(id)}/docs/${encodeURIComponent(d.hash)}/file" target="_blank" rel="noopener">${escapeHtml(d.name)}</a>` : `${escapeHtml(d.name)} <span class="ap-sub">(원본 없음, 글자만)</span>`}</li>`).join('')}</ul>` : '아직 올린 서류가 없어요.') + (j.fileStore === 'none' ? '<div class="manage-hint">파일 창고(Vercel Blob)가 연결되지 않아 원본 PDF는 저장되지 않아요.</div>' : '');
+  } catch { if (apd.id === id) box.textContent = '서버에 연결하지 못했어요.'; }
+}
+document.getElementById('apdDocUp').addEventListener('change', async e => {
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length || !apd.id) return; const id = apd.id; const msg = document.getElementById('apdDocMsg'); const out = [];
+  for (const f of files) {
+    if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { out.push(`${f.name}: PDF가 아니에요`); continue; }
+    if (f.size > 4 * 1024 * 1024) { out.push(`${f.name}: 4MB 이하로 줄여주세요`); continue; }
+    msg.textContent = `${f.name} 올리는 중...`;
+    try { const r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/docs?filename=' + encodeURIComponent(f.name), { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: f }); const j = await r.json().catch(() => ({})); out.push(`${f.name}: ${j.message || j.error || (r.ok ? '올렸어요' : '올리지 못했어요')}`); } catch { out.push(`${f.name}: 서버에 연결하지 못했어요`); }
+  }
+  if (apd.id !== id) return; msg.textContent = out.join(' / '); apdLoadDocs(id);
+});
+// 지원자 페이지 오른쪽: 채용과제(과제 고르기 → 과제 문자 쓰기, 보낸 날·마감·제출·평가 메모)
+let apdTaskCur = null;
+const isoDay = d => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+async function apdLoadTask(id) {
+  const box = document.getElementById('apdTask'); box.textContent = '불러오는 중...';
+  const [tr, list] = await Promise.all([fetch('/api/applicants/' + encodeURIComponent(id) + '/task').then(r => r.json().then(j => ({ ok: r.ok, j }))).catch(() => ({ ok: false, j: {} })), loadTasks()]);
+  if (apd.id !== id) return; if (!tr.ok) { box.textContent = tr.j.error || '채용과제를 불러오지 못했어요.'; return; }
+  apdTaskCur = tr.j.task || {}; const t = apdTaskCur;
+  document.getElementById('apdTaskTabSub').textContent = t.title ? ` · ${t.result || (t.dueAt ? `마감 ${t.dueAt.slice(5).replace('-', '/')}` : '진행 중')}` : '';   /* 탭에 과제 진행을 짧게 보여줘요 */ const lead = ME.role === 'teamlead'; const full = apCanEdit() && !lead; const can = full || lead;
+  const dis = full ? '' : ' disabled';
+  box.innerHTML = `<div class="task-row"><div class="field"><label for="apdTaskSel">과제</label><select id="apdTaskSel"${dis}><option value="">과제를 고르세요</option>${list.map(x => `<option value="${escapeHtml(x.id)}"${x.id === t.taskId ? ' selected' : ''}>${escapeHtml(x.title)}${x.team ? ' · ' + escapeHtml(x.team) : ''}</option>`).join('')}</select></div></div>
+    <div class="field"><label for="apdTaskBody">과제 내용(문자의 [입력] 칸)</label><textarea id="apdTaskBody" rows="4"${dis}>${escapeHtml(t.body || '')}</textarea></div>
+    <div class="task-row"><div class="field"><label for="apdTaskSent">보낸 날</label><input type="date" id="apdTaskSent" value="${escapeHtml(t.sentAt || '')}"${dis} /></div><div class="field"><label for="apdTaskDue">마감일</label><input type="date" id="apdTaskDue" value="${escapeHtml(t.dueAt || '')}"${dis} /></div><div class="field"><label for="apdTaskSub">제출일</label><input type="date" id="apdTaskSub" value="${escapeHtml(t.submittedAt || '')}"${can ? '' : ' disabled'} /></div><div class="field"><label for="apdTaskRes">진행</label><select id="apdTaskRes"${can ? '' : ' disabled'}>${['', '제출함', '미제출', '검토 완료'].map(v => `<option value="${v}"${(t.result || '') === v ? ' selected' : ''}>${v || '-'}</option>`).join('')}</select></div></div>
+    <div class="field"><label for="apdTaskMemo">평가 메모(과제 결과물에 대한 의견만)</label><textarea id="apdTaskMemo" rows="3" maxlength="3000"${can ? '' : ' disabled'}>${escapeHtml(t.memo || '')}</textarea></div>
+    <div class="task-actions">${can ? '<button type="button" id="apdTaskSave" class="add-btn">채용과제 저장</button> ' : ''}${full && canEdit('send') ? '<button type="button" id="apdTaskSms" class="link-btn">📨 과제 문자 쓰기</button> ' : ''}<span id="apdTaskMsg" class="ap-sub">${t.updatedAt ? `${escapeHtml(t.updatedBy || '')} · ${escapeHtml(apdWhen(t.updatedAt))}` : ''}</span></div>`;
+}
+document.getElementById('apdTask').addEventListener('change', e => {
+  if (e.target.id !== 'apdTaskSel') return; const t = taskList.find(x => x.id === e.target.value); if (!t) return;
+  document.getElementById('apdTaskBody').value = t.body;
+  const today = new Date(); const due = new Date(today.getTime() + t.days * 86400000);
+  if (!document.getElementById('apdTaskSent').value) document.getElementById('apdTaskSent').value = isoDay(today);
+  document.getElementById('apdTaskDue').value = isoDay(due);
+});
+document.getElementById('apdTask').addEventListener('click', async e => {
+  const id = apd.id; if (!id) return; const msg = document.getElementById('apdTaskMsg');
+  if (e.target.id === 'apdTaskSave') {
+    const lead = ME.role === 'teamlead'; const v = k => document.getElementById(k).value;
+    const body = lead ? { submittedAt: v('apdTaskSub'), result: v('apdTaskRes'), memo: v('apdTaskMemo') } : { taskId: v('apdTaskSel'), body: v('apdTaskBody'), sentAt: v('apdTaskSent'), dueAt: v('apdTaskDue'), submittedAt: v('apdTaskSub'), result: v('apdTaskRes'), memo: v('apdTaskMemo') };
+    body.expectedAt = (apdTaskCur && apdTaskCur.updatedAt) || '';
+    const r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/task', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = j.error || '저장하지 못했어요.'; return; }
+    apdTaskCur = j.task; msg.textContent = '저장했어요.'; const tt = apdTaskCur; document.getElementById('apdTaskTabSub').textContent = tt.title ? ` · ${tt.result || (tt.dueAt ? `마감 ${tt.dueAt.slice(5).replace('-', '/')}` : '진행 중')}` : '';
+  }
+  if (e.target.id === 'apdTaskSms') {   // 채용과제 문자(t5)를 골라 이름·연락처·마감일을 채우고 [입력] 칸에 과제 내용을 넣어요(문자는 직접 확인하고 보내요)
+    const x = apd.x; const body = document.getElementById('apdTaskBody').value.trim(); const due = document.getElementById('apdTaskDue').value;
+    if (!body) { msg.textContent = '과제 내용을 먼저 넣어주세요.'; return; }
+    try { await loadTemplates(); } catch { /* 아래에서 안내 */ }   // 문자 양식을 최신으로 불러온 뒤 골라요
+    const tpl = [...templateSelect.options].find(o => o.value === 't5') || [...templateSelect.options].find(o => o.textContent.includes('채용과제'));
+    if (!tpl) { msg.textContent = '문자 양식에 "채용과제"가 없어요. 양식 관리에서 확인해주세요.'; return; }
+    if (!apdClose()) return;
+    fillSendFormFromNotion({ id: x.id, name: x.name, phone: x.phone, team: x.team, job: x.job, status: x.status, interview1: '', interview2: '', smsStatus: '' });
+    try { await loadTemplates(); } catch { /* 위에서 이미 불러왔어요 */ }   // 탭을 바꾸며 다시 불러오는 양식이 끝난 뒤에 골라요
+    templateSelect.value = tpl.value; previewEdited = false; previewResetBtn.hidden = true; updateDateFieldVisibility();
+    if (due) { const d = new Date(due + 'T00:00:00+09:00'); dateInput.value = `${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]})`; }
+    validate(); await updatePreview();
+    const put = () => { if (previewText.value.includes('[입력]')) { previewText.value = previewText.value.replace('[입력]', body); previewEdited = true; previewResetBtn.hidden = false; charCount.textContent = `${previewText.value.length}자`; validate(); } };
+    put(); setTimeout(put, 700); setTimeout(put, 1600);   // 앞서 시작된 미리보기 갱신이 늦게 끝나 덮어써도 다시 넣어요
+  }
+});
+// 지원자 페이지 오른쪽 탭: 면접 기록 / 질문·답변 / 채용과제
+function apdShowPane(name) {
+  apdEl.querySelectorAll('.apd-tab').forEach(b => { const on = b.dataset.pane === name; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+  apdEl.querySelectorAll('.apd-pane').forEach(p => { p.hidden = p.dataset.pane !== name; });
+}
+apdEl.querySelector('.apd-tabs').addEventListener('click', e => { const b = e.target.closest('.apd-tab'); if (b) apdShowPane(b.dataset.pane); });
+// 지원자 페이지 머리: 면접상태 바꾸기 · 📨 문자 · 📅 일정(이 페이지에서 다음 단계로 바로 넘어가요)
+function apdRenderActions() {
+  const box = document.getElementById('apdActions'); const x = apd.x; if (!x) { box.innerHTML = ''; return; }
+  if (!apCanEdit() || ME.role === 'teamlead') { box.innerHTML = ''; document.getElementById('apdStatus').textContent = x.status || ''; return; }
+  document.getElementById('apdStatus').textContent = '';
+  const sts = ((apOptions && apOptions.statuses) || AP_VISIBLE).slice(); if (x.status && !sts.includes(x.status)) sts.unshift(x.status);
+  box.innerHTML = `<label class="apd-st-label">면접상태 <select id="apdStatusSel" aria-label="면접상태">${sts.map(s => `<option${s === x.status ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>${canEdit_('send') ? ' <button type="button" id="apdSmsBtn" class="add-btn">📨 문자</button>' : ''}${canEdit_('schedule') ? ' <button type="button" id="apdSchBtn" class="link-btn">📅 일정</button>' : ''}`;
+}
+document.getElementById('apdActions').addEventListener('change', async e => {
+  if (e.target.id !== 'apdStatusSel' || !apd.x) return; const sel = e.target; const x = apd.x; const next = sel.value;
+  if (next === '탈락 확정' && !confirm(`${x.name || '이 지원자'} 님을 "탈락 확정"으로 바꿀까요? (탈락은 사람이 정하는 거예요)\n탈락 확정이 되면 앱 목록에서는 보이지 않아요.`)) { sel.value = x.status; return; }
+  sel.disabled = true;
+  try { if (!apList.some(v => v.id === x.id)) apList.push(x); const nx = await apSave(x.id, { status: next }); apd.x = { ...x, ...nx }; apdMsg(`면접상태를 "${next}"로 바꿨어요.`, 'ok'); apReloadView(); }
+  catch (err) { sel.value = x.status; apdMsg(err.message || '저장하지 못했어요.', 'err'); }
+  finally { sel.disabled = false; apdRenderActions(); }
+});
+document.getElementById('apdActions').addEventListener('click', e => {
+  const x = apd.x; if (!x) return;
+  if (e.target.id === 'apdSmsBtn') { if (!apdClose()) return; fillSendFormFromNotion({ id: x.id, name: x.name, phone: x.phone, team: x.team, job: x.job, status: x.status, interview1: x.interview1 || '', interview2: x.interview2 || '', smsStatus: x.smsStatus || '' }); }
+  if (e.target.id === 'apdSchBtn') { if (!apdClose()) return; fillScheduleFormFromNotion(x); }
+});
+// 지원자 페이지 오른쪽: 면접 평가표(내 평가 쓰기 + 면접관 모두의 평가·평균)
+let apdScoreData = null;
+async function apdLoadScore(id) {
+  const box = document.getElementById('apdScore'); box.textContent = '불러오는 중...';
+  let r, j; try { r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/scorecards'); j = await r.json().catch(() => ({})); } catch { if (apd.id === id) box.textContent = '서버에 연결하지 못했어요.'; return; }
+  if (apd.id !== id) return; if (!r.ok) { box.textContent = j.error || '면접 평가를 불러오지 못했어요.'; return; }
+  apdScoreData = j; apdRenderScore();
+}
+function apdRenderScore() {
+  const d = apdScoreData; if (!d) return; const box = document.getElementById('apdScore'); const can = apCanEdit() || ME.role === 'teamlead';
+  const round = (document.getElementById('apdScoreRound') || {}).value || (apd.x && apd.x.status === '2차 면접 예정' ? '2차' : '1차');
+  const mine = d.cards.find(c => c.mine && c.round === round);
+  const radios = it => [1, 2, 3, 4, 5].map(n => `<label class="sc-pt"><input type="radio" name="sc-${it.key}" value="${n}"${mine && mine.scores[it.key] === n ? ' checked' : ''}${can ? '' : ' disabled'} /><span>${n}</span></label>`).join('');
+  const sumHtml = Object.keys(d.summary).length ? d.rounds.filter(r => d.summary[r]).map(r => { const s = d.summary[r]; return `<div class="sc-sum"><strong>${r} 면접</strong> 평균 <b class="sc-avg">${s.overall ?? '-'}</b>/5 · 면접관 ${s.count}명 · ${Object.entries(s.verdicts).map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' · ')}<div class="sc-bars">${d.items.map(it => `<span>${escapeHtml(it.label)} ${s.avg[it.key] ?? '-'}</span>`).join('')}</div></div>`; }).join('') : '<p class="ap-sub">아직 면접 평가가 없어요.</p>';
+  const list = d.cards.length ? `<table class="history-table stack-table sc-table"><thead><tr><th>면접관</th><th>차수</th>${d.items.map(it => `<th>${escapeHtml(it.label)}</th>`).join('')}<th>추천</th><th>한 줄 평</th></tr></thead><tbody>${d.cards.map(c => `<tr><td data-label="면접관">${escapeHtml(c.name || '')}${c.mine ? ' <span class="ap-sub">(나)</span>' : ''}</td><td data-label="차수">${escapeHtml(c.round)}</td>${d.items.map(it => `<td data-label="${escapeHtml(it.label)}">${c.scores[it.key]}</td>`).join('')}<td data-label="추천">${escapeHtml(c.verdict)}</td><td data-label="한 줄 평">${escapeHtml(c.comment || '')}</td></tr>`).join('')}</tbody></table>` : '';
+  box.innerHTML = `<div class="sc-summaries">${sumHtml}</div>${list}` + (can ? `<div class="sc-form"><h4>내 평가 ${mine ? '<span class="ap-sub">(저장된 평가를 고쳐요)</span>' : ''}</h4>
+    <div class="field"><label for="apdScoreRound">면접 차수</label><select id="apdScoreRound">${d.rounds.map(r => `<option${r === round ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
+    ${d.items.map(it => `<div class="sc-row"><div class="sc-label"><strong>${escapeHtml(it.label)}</strong><span class="ap-sub">${escapeHtml(it.hint)}</span></div><div class="sc-pts" role="radiogroup" aria-label="${escapeHtml(it.label)}">${radios(it)}</div></div>`).join('')}
+    <div class="field"><label for="apdScoreVerdict">추천 의견</label><select id="apdScoreVerdict"><option value="">고르세요</option>${d.verdicts.map(v => `<option${mine && mine.verdict === v ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label for="apdScoreComment">한 줄 평(관찰한 행동과 근거)</label><textarea id="apdScoreComment" rows="2" maxlength="1000">${escapeHtml(mine ? mine.comment || '' : '')}</textarea></div>
+    <div class="task-actions"><button type="button" id="apdScoreSave" class="add-btn">평가 저장</button>${mine ? ' <button type="button" id="apdScoreDel" class="link-btn">내 평가 지우기</button>' : ''} <span id="apdScoreMsg" class="ap-sub"></span></div>
+    <p class="manage-hint">점수는 검토 참고용이에요. 합격·불합격은 사람이 정해요. 나이·가족·외모 같은 내용은 평가에 쓰지 않아요.</p></div>` : '');
+}
+document.getElementById('apdScore').addEventListener('change', e => { if (e.target.id === 'apdScoreRound') apdRenderScore(); });
+document.getElementById('apdScore').addEventListener('click', async e => {
+  const id = apd.id; if (!id) return; const msg = () => document.getElementById('apdScoreMsg');
+  if (e.target.id === 'apdScoreSave') {
+    const scores = {}; for (const it of apdScoreData.items) { const c = document.querySelector(`#apdScore input[name="sc-${it.key}"]:checked`); if (!c) { msg().textContent = `"${it.label}" 점수를 골라주세요.`; return; } scores[it.key] = Number(c.value); }
+    const body = { round: document.getElementById('apdScoreRound').value, scores, verdict: document.getElementById('apdScoreVerdict').value, comment: document.getElementById('apdScoreComment').value };
+    const r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/scorecards', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg().textContent = j.error || '저장하지 못했어요.'; return; }
+    await apdLoadScore(id); const m = document.getElementById('apdScoreMsg'); if (m) m.textContent = '저장했어요.';
+  }
+  if (e.target.id === 'apdScoreDel') {
+    if (!confirm('내 면접 평가를 지울까요?')) return; const round = document.getElementById('apdScoreRound').value;
+    const r = await fetch('/api/applicants/' + encodeURIComponent(id) + '/scorecards/' + encodeURIComponent(round), { method: 'DELETE' });
+    if (r.ok) apdLoadScore(id); else msg().textContent = '지우지 못했어요.';
+  }
+});
+// 지원자 페이지 오른쪽: 면접 질문 추천·답변 적기(면접 관리의 질문·답변 화면을 이 페이지 안에 열어요)
+let apdIv = null;
+function apdIvUnmount() { if (apdIv && ivPanel === apdIv) ivPanel = null; apdIv = null; document.getElementById('apdIvHost').innerHTML = ''; document.getElementById('apdIvOpen').hidden = false; }
+document.getElementById('apdIvOpen').addEventListener('click', () => {
+  if (!apd.x) return; if (interviewDirty() && ivPanel !== apdIv && !confirm('면접 관리 화면에 보내지 않은 답변이 있어요. 여기서 새로 열면 그 답변이 사라져요.\n\n그래도 열까요?')) return;
+  document.getElementById('apdIvOpen').hidden = true;
+  apdIv = mountInterviewPanel(document.getElementById('apdIvHost'), { preset: apd.x, onClose: () => apdIvUnmount() }); ivPanel = apdIv;
+});
 function apdClose(force) {
   if (!force && apd.dirty.size && !confirm('저장하지 않은 내용이 있어요. 그래도 닫을까요?')) return false;
+  if (!force && apdIv && apdIv.isDirty() && !confirm('보내지 않은 면접 답변이 있어요. 닫으면 사라져요. 그래도 닫을까요?')) return false;
+  apdIvUnmount();
   apdEl.hidden = true; document.body.classList.remove('apd-open'); apd.id = ''; apd.dirty.clear(); return true;
 }
 async function apdSave(sec) {
@@ -4799,8 +5004,10 @@ function apFillTeamOptions() {   // 팀 선택은 앱의 공식 11개 팀만 보
   const keep = apTeam.value; apTeam.innerHTML = '<option value="">전체 팀</option>' + AP_OFFICIAL_TEAMS.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join(''); if (AP_OFFICIAL_TEAMS.includes(keep)) apTeam.value = keep;
 }
 function apSetView(v) {
-  apView = v; const month = v === 'month', kanban = v === 'kanban', list = v === 'list';
-  for (const [id, on] of [['apViewList', list], ['apViewMonth', month], ['apViewKanban', kanban]]) { const b = document.getElementById(id); b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }
+  apView = v; const month = v === 'month', kanban = v === 'kanban', list = v === 'list', sched = v === 'sched';
+  for (const [id, on] of [['apViewList', list], ['apViewMonth', month], ['apViewKanban', kanban], ['apViewSched', sched]]) { const b = document.getElementById(id); b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); }
+  document.getElementById('apSchedWrap').hidden = !sched; document.querySelector('#interviewView .ap-filters') && (document.querySelector('#interviewView .ap-filters').hidden = sched);   // 일정 등록·목록(예전 문자 보내기 아래에 있던 화면)
+  if (sched) { apMonthBar.hidden = true; apMonthBody.hidden = true; document.getElementById('apKanban').hidden = true; document.getElementById('apTable').hidden = true; document.getElementById('apCount').hidden = true; apMore.hidden = true; setApMsg(''); return; }
   apMonthBar.hidden = !month; apMonthBody.hidden = !month; document.getElementById('apKanban').hidden = !kanban;
   document.getElementById('apTable').hidden = !list; document.getElementById('apCount').hidden = !list; apMore.hidden = !list || !apCursor;
   apStatus.hidden = !list;   // 면접 일정·칸반 보기는 모든 상태를 보여줘서 상태 선택이 필요 없어요
@@ -4839,6 +5046,9 @@ function apRenderMonth() {
 document.getElementById('apViewList').addEventListener('click', () => { if (apView !== 'list') apSetView('list'); });
 document.getElementById('apViewMonth').addEventListener('click', () => { if (apView !== 'month') apSetView('month'); });
 document.getElementById('apViewKanban').addEventListener('click', () => { if (apView !== 'kanban') apSetView('kanban'); });
+document.getElementById('apViewSched').addEventListener('click', () => { if (apView !== 'sched') apSetView('sched'); });
+// 다른 화면(문자·지원자 목록의 📅 일정 버튼 등)에서 일정 등록·목록을 열 때 써요
+function openScheduleView() { showTab('interview'); apSetView('sched'); }
 apMonthEl.addEventListener('change', () => loadMonth());
 document.getElementById('apPrevMonth').addEventListener('click', () => { apMonthEl.value = apShiftMonth(apMonthEl.value || apTodayMonth(), -1); loadMonth(); });
 document.getElementById('apNextMonth').addEventListener('click', () => { apMonthEl.value = apShiftMonth(apMonthEl.value || apTodayMonth(), 1); loadMonth(); });
@@ -4977,13 +5187,15 @@ let batchRunning = false;
 
 // ---------- 이력서에 적힌 지원분야 읽기 · 공고 분류 (읽어서 보여주기만 하고, 어느 공고인지는 사람이 골라요) ----------
 const batchAppliedKey = s => String(s || '').replace(/[^0-9A-Za-z가-힣]/g, '').toLowerCase();
+const batchKindOf = {};   // 파일 이름 → 서류 종류(이력서·포트폴리오·경력기술서·자기소개서·자격증·증명서·기타)
 async function batchReadApplied(row) {
   const f = batchFilesOf(row)[0];
   if (!f) { row.appliedState = 'done'; return; }
   try {
-    const res = await fetch('/api/resume/read-applied', { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: f });
+    const res = await fetch('/api/resume/read-applied?filename=' + encodeURIComponent(f.name), { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: f });
     const j = await res.json().catch(() => null);
     row.appliedFor = res.ok && j && typeof j.appliedFor === 'string' ? j.appliedFor : '';
+    if (res.ok && j) { if (j.name && !row.personName) row.personName = String(j.name).slice(0, 20); if (j.kind) batchKindOf[batchFileKey(f.name)] = String(j.kind); }   // 첫 쪽의 "성명"·파일 이름에서 읽은 이름(같은 사람끼리 묶을 때 써요)
   } catch { row.appliedFor = ''; }
   row.appliedState = 'done';
 }
@@ -4999,6 +5211,7 @@ async function batchReadAppliedAll() {
       await Promise.all([worker(), worker()]);   // 한 번에 2개씩
     }
   } finally { batchReading = false; }
+  batchAutoGroup();   // 다 읽으면 같은 사람의 서류(이력서·포트폴리오·자격증 등)를 자동으로 한 줄로 묶어요
 }
 // 확정된 공고 중 지원분야와 비슷한 순서(단어가 겹치는 정도). 동점이면 모두 "비슷해요"로 표시하고, 고르는 건 사람이에요.
 function batchPostingChoices(applied) {
@@ -5147,7 +5360,7 @@ function batchRender() {
   batchBody.innerHTML = batchSorted().map((row, idx) => {
     const r = row.result;
     const cand = (r && r.candidate) || {};
-    const name = r ? (cand.name || '(이름을 못 읽었어요)') : (row.file ? (batchFilesOf(row).length > 1 ? `서류 ${batchFilesOf(row).length}개 묶음` : row.file.name) : '(가져온 결과)');
+    const name = r ? (cand.name || row.personName || '(이름을 못 읽었어요)') : (row.file ? (row.personName ? row.personName : (batchFilesOf(row).length > 1 ? `서류 ${batchFilesOf(row).length}개 묶음` : row.file.name)) : '(가져온 결과)');
     let cells;
     if (row.state === 'ok' && !r) { row.state = 'err'; row.error = '평가 결과를 불러오지 못했어요. "다시 평가"를 눌러주세요.'; }   // 한 줄이 어긋나도 표 전체가 깨지지 않게
     if (row.state === 'ok') {
@@ -5156,15 +5369,15 @@ function batchRender() {
     } else if (row.state === 'run') cells = '<td colspan="4" class="batch-state">AI가 평가하는 중... (최대 1분)</td>';
     else if (row.state === 'err') cells = `<td colspan="4" class="batch-err">${escapeHtml(row.error)}${row.appliedFor ? `<div class="manage-hint batch-applied-line">이력서의 지원분야: <strong>${escapeHtml(row.appliedFor)}</strong></div>` : ''}</td>`;
     else cells = `<td colspan="4" class="batch-state">대기 중 (아직 점수를 안 봤어요)${row.appliedState === 'reading' ? '<div class="manage-hint batch-applied-line">지원분야를 읽는 중…</div>' : `<div class="manage-hint batch-applied-line">이력서의 지원분야: ${row.appliedFor ? '<strong>' + escapeHtml(row.appliedFor) + '</strong>' : '못 읽었어요'}</div>`}${row.file && !(row.reg && row.reg.id) && scorablePostings().length ? batchPostingSelectHtml(row, 'batch-row-sel') : ''}</td>`;
-    const reg = row.reg && row.reg.id ? `<span class="batch-badge">서류 합격 확정됨</span>` : '';
-    const pick = row.state === 'ok' && !(row.reg && row.reg.id) ? `<label class="check-chip batch-pick-chip"><input type="checkbox" class="batch-pick"${row.picked ? ' checked' : ''}${row.recording ? ' disabled' : ''} /> 선정</label> ` : '';
+    const reg = row.reg && row.reg.id ? `<span class="batch-badge">${row.reg.status && row.reg.status !== '서류합격' ? `${escapeHtml(row.reg.status)}로 넘김` : '서류 합격 확정됨'}</span>` : '';
+    const pick = row.state === 'ok' && !(row.reg && row.reg.id) ? `<label class="check-chip batch-pick-chip"><input type="checkbox" class="batch-pick"${row.picked ? ' checked' : ''}${row.recording ? ' disabled' : ''} /> 선정</label> ` + (canEdit('resume') && !row.recording ? '<button type="button" class="add-btn batch-pass1-btn">1차 면접</button> <button type="button" class="link-btn batch-reject-btn">서류탈락</button> ' : '') : '';   // 전형 넘기기: 1차 면접(지원자로 등록 → 문자) / 서류탈락(바로 삭제)
     const btns = row.state === 'ok'
       ? pick + `<button type="button" class="link-btn batch-detail-btn">${row.open ? '접기' : '점수표'}</button> ` + (row.reg && row.reg.id ? ((canEdit('send') ? '<button type="button" class="add-btn batch-sms-btn">📨 면접 문자</button> ' : '') + (canEdit('schedule') ? '<button type="button" class="link-btn batch-sch-btn">📅 일정 등록</button> ' : '') + (row.reg.url ? `<a class="link-btn" href="${escapeHtml(row.reg.url)}" target="_blank" rel="noopener noreferrer">노션에서 열기</a>` : '')) : '<button type="button" class="add-btn batch-reg-btn">서류 합격 확정</button>') + (row.rid && row.positionId ? (row.hired ? ' <button type="button" class="link-btn batch-unhire-btn" title="인사서류 보관을 풀고 일반 결과처럼 정한 기간 뒤에 삭제해요">합격 해제</button>' : ' <button type="button" class="link-btn batch-hire-btn" title="입사가 확정된 사람만 눌러요. 인사서류로 보고 합격 확정일부터 정한 연수만큼 보관해요">최종 합격</button>') : '') + (row.rid && row.positionId ? ' <button type="button" class="link-btn batch-delsaved-btn" title="서버에 저장된 이 사람의 점수 결과(이름·연락처·인적사항 포함)를 지워요">삭제</button>' : '')
       : (row.state === 'err' ? '<button type="button" class="link-btn batch-retry-btn">다시 평가</button>' : '') + (row.state === 'wait' || row.state === 'err' ? ' <button type="button" class="link-btn batch-remove-btn">빼기</button>' : '');
     const canMerge = (row.state === 'wait' || row.state === 'err') && row.file && !(row.reg && row.reg.id);
     const mergeChk = canMerge ? `<label class="check-chip batch-merge-chk-chip"><input type="checkbox" class="batch-merge-chk"${row.merge ? ' checked' : ''} /> 묶기</label>` : '';
     const ungroup = canMerge && batchFilesOf(row).length > 1 ? ' <button type="button" class="link-btn batch-ungroup-btn">묶음 풀기</button>' : '';
-    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일">${mergeChk}<strong>${escapeHtml(name)}</strong>${reg}${row.saved ? '<span class="batch-saved-tag" title="공고별로 서버에 저장된 결과예요">저장된 결과</span>' : ''}${row.hired ? '<span class="batch-hired-tag" title="최종 합격(입사 확정)으로 표시해 인사서류로 보관 중이에요. 채용서류 반환 청구 기간이 적용되지 않아요">합격자 · 인사서류</span>' : ''}${row.expiresAt ? `<span class="batch-expire${batchExpireSoon(row.expiresAt) ? ' soon' : ''}" title="이 날 서버에서 자동으로 삭제돼요">삭제 예정 ${escapeHtml(row.expiresAt)}</span>` : ''}${ungroup}${row.state === 'ok' && r ? personalHtml(r, 'chips') : ''}<span class="ap-sub">${row.file ? (batchFilesOf(row).length > 1 ? `<span title="${escapeHtml(batchFilesOf(row).map(x => x.name).join('\n'))}">📎 서류 ${batchFilesOf(row).length}개 묶음 · ${batchSizeText(batchFilesOf(row).reduce((n, x) => n + x.size, 0))}<br>${escapeHtml(batchFilesOf(row).map(x => x.name).join(', '))}</span>` : `${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}`) : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
+    const main = `<tr class="batch-row${row.reg && row.reg.id ? ' done' : ''}" data-id="${row.id}"><td data-label="#">${idx + 1}</td><td data-label="지원자 · 파일">${mergeChk}<strong>${escapeHtml(name)}</strong>${reg}${row.saved ? '<span class="batch-saved-tag" title="공고별로 서버에 저장된 결과예요">저장된 결과</span>' : ''}${row.hired ? '<span class="batch-hired-tag" title="최종 합격(입사 확정)으로 표시해 인사서류로 보관 중이에요. 채용서류 반환 청구 기간이 적용되지 않아요">합격자 · 인사서류</span>' : ''}${row.expiresAt ? `<span class="batch-expire${batchExpireSoon(row.expiresAt) ? ' soon' : ''}" title="이 날 서버에서 자동으로 삭제돼요">삭제 예정 ${escapeHtml(row.expiresAt)}</span>` : ''}${ungroup}${row.state === 'ok' && r ? personalHtml(r, 'chips') : ''}<span class="ap-sub">${row.file ? (batchFilesOf(row).length > 1 ? `<details class="batch-files"><summary>📎 서류 ${batchFilesOf(row).length}개 · ${batchSizeText(batchFilesOf(row).reduce((n, x) => n + x.size, 0))} (눌러서 보기)</summary><ul>${batchFilesOf(row).map(x => `<li>${batchKindOf[batchFileKey(x.name)] ? `<span class="batch-kind">${escapeHtml(batchKindOf[batchFileKey(x.name)])}</span> ` : ''}${escapeHtml(x.name)} · ${batchSizeText(x.size)}</li>`).join('')}</ul>${row.leftOut && row.leftOut.length ? `<div class="manage-hint">4MB를 넘어 점수에 쓰지 않은 서류: ${escapeHtml(row.leftOut.join(', '))}</div>` : ''}</details>` : `${batchKindOf[batchFileKey(row.file.name)] ? `<span class="batch-kind">${escapeHtml(batchKindOf[batchFileKey(row.file.name)])}</span> ` : ''}${escapeHtml(row.file.name)} · ${batchSizeText(row.file.size)}`) : '가져온 채점 결과 (이력서 PDF 없음)'}</span>${row.recMsg ? `<span class="ap-sub batch-recmsg ${row.recErr ? 'err' : ''}">${escapeHtml(row.recMsg)}</span>` : ''}</td>${cells}<td data-label="">${btns}</td></tr>`;
     return main + (row.open && row.state === 'ok' ? batchDetailHtml(row) : '');
   }).join('');
   batchBody.querySelectorAll('tr.batch-detail').forEach(async d => {
@@ -5215,9 +5428,24 @@ async function batchBundleBody(files) {
   for (const f of files) { const nb = enc.encode(f.name); parts.push(u32(nb.length), nb, u32(f.size), await f.arrayBuffer()); }
   return new Blob(parts, { type: 'application/octet-stream' });
 }
-const BATCH_GROUP_MAX_FILES = 4;
+const BATCH_GROUP_MAX_FILES = 8;   // 서버와 같아요
 // 흔한 서류 이름·직무 말(사람 이름이 아니에요). 파일 이름에서 "같은 사람" 후보를 찾을 때 걸러요.
 const BATCH_NAME_STOP = new Set(['이력서', '파일이력서', '포트폴리오', '자기소개서', '자소서', '경력기술서', '경력', '지원서', '이력', '서류', '첨부', '제출', '원본', '최종', '수정', '영문', '국문', '사본', '정규직', '신입', '채용', '공고', '온라인', '오프라인', '백화점', '아울렛', '영업', '기획', '패션', '디자인', '마케팅', '운영', '관리', '그로잉업팀', '그로잉업', '리포트', '발표', '보고서', '위원회', '재고', '사업', '프로젝트', '리뷰', '투자', '승인서', '계획', '실적', '현황', '자료']);
+['자격증', '증명서', '졸업증명서', '성적증명서', '경력증명서', '재직증명서', '자격', '토익', '어학', '성적', '졸업', '수료증', '포폴', '입사지원서', '기술서', '소개서', '사람인', '잡코리아', '원티드', '인크루트'].forEach(w => BATCH_NAME_STOP.add(w));
+// 한 줄(파일 하나)의 사람 이름: 파일 첫 쪽의 "성명"을 먼저 쓰고, 없으면 파일 이름에 사람 이름으로 보이는 말이 하나뿐일 때 그걸 써요
+function batchPersonOf(row) { if (row.personName) return row.personName; const t = batchNameTokens((batchFilesOf(row)[0] || {}).name); return t.length === 1 ? t[0] : ''; }
+// 올린 서류를 같은 사람끼리 자동으로 묶어요(점수 보기 전 줄만). 틀린 묶음은 "묶음 풀기"로 되돌려요
+function batchAutoGroup() {
+  if (batchRunning) return;
+  const cand = batchRows.filter(r => (r.state === 'wait' || r.state === 'err') && r.file && !(r.reg && r.reg.id) && r.appliedState !== 'reading' && !r.noAutoGroup);
+  const byName = new Map(); cand.forEach(r => { const n = batchPersonOf(r); if (!n) return; if (!byName.has(n)) byName.set(n, []); byName.get(n).push(r); });
+  const done = [], tooMany = [];
+  byName.forEach((rows, n) => {
+    if (rows.length < 2) { if (rows[0] && !rows[0].personName) rows[0].personName = n; return; }
+    const r = batchMergeRows(rows); if (r.ok) { r.first.personName = n; done.push(`${n}(${r.count}개)`); } else tooMany.push(`${n}: ${r.msg}`);
+  });
+  if (done.length || tooMany.length) { batchRender(); batchInfoRefresh(); setBatchStatus([done.length ? `같은 사람의 서류를 자동으로 묶었어요: ${done.join(', ')}. 다른 사람이 섞였으면 "묶음 풀기"를 눌러주세요.` : '', tooMany.length ? `묶지 못한 사람: ${tooMany.join(' / ')}` : ''].filter(Boolean).join(' · '), tooMany.length ? 'err' : 'ok'); }
+}
 function batchNameTokens(fname) {
   return [...new Set(String(fname || '').replace(/\.[A-Za-z0-9]+$/, '').split(/[_\s\-.()\[\]]+/).filter(t => /^[가-힣]{2,4}$/.test(t) && !BATCH_NAME_STOP.has(t)))];
 }
@@ -5228,8 +5456,6 @@ function batchMergeRows(rows) {
   const files = rows.flatMap(batchFilesOf);
   const seen = new Set(); for (const f of files) { const k = batchFileKey(f.name); if (seen.has(k)) return { ok: false, msg: `같은 이름의 파일(${f.name})이 있어서 묶지 않았어요.` }; seen.add(k); }
   if (files.length > BATCH_GROUP_MAX_FILES) return { ok: false, msg: `한 사람의 서류는 최대 ${BATCH_GROUP_MAX_FILES}개까지 묶을 수 있어요(지금 ${files.length}개).` };
-  const total = files.reduce((n, f) => n + f.size, 0);
-  if (total > PDF_MAX_BYTES) return { ok: false, msg: `서류 합계가 ${batchSizeText(total)}라서 ${Math.round(PDF_MAX_BYTES / 1048576)}MB를 넘어요. 파일을 줄이거나 나눠서 올려주세요.` };
   const first = rows[0]; first.files = files; first.file = files[0]; first.state = 'wait'; first.result = null; first.error = ''; first.picked = false; first.merge = false; first.positionId = '';
   batchRows = batchRows.filter(r => r === first || !rows.includes(r));
   return { ok: true, first, count: files.length };
@@ -5247,7 +5473,7 @@ document.getElementById('batchMergeSuggestBtn').addEventListener('click', () => 
   const groups = []; const used = new Set();
   [...byTok.entries()].filter(([, s]) => s.size >= 2).sort((x, y) => y[1].size - x[1].size).forEach(([tok, s]) => {
     const rows = [...s].filter(r => !used.has(r)); if (rows.length < 2) return;
-    if (rows.flatMap(batchFilesOf).length > BATCH_GROUP_MAX_FILES || rows.flatMap(batchFilesOf).reduce((n, f) => n + f.size, 0) > PDF_MAX_BYTES) return;   // 안 맞는 묶음은 제안하지 않아요(직접 묶어주세요)
+    if (rows.flatMap(batchFilesOf).length > BATCH_GROUP_MAX_FILES) return;   // 안 맞는 묶음은 제안하지 않아요(직접 묶어주세요)
     rows.forEach(r => used.add(r)); groups.push({ tok, rows });
   });
   if (!groups.length) { setBatchStatus('같은 이름으로 묶을 만한 파일을 찾지 못했어요(파일 이름에 같은 사람 이름이 2개 이상 들어 있어야 해요). 직접 "묶기"를 체크해 묶어주세요.', 'err'); return; }
@@ -5261,8 +5487,8 @@ batchBody.addEventListener('click', e => {
   const b = e.target.closest('.batch-ungroup-btn'); if (!b) return;
   const tr = b.closest('tr[data-id]'); const row = batchRows.find(r => r.id === Number(tr.dataset.id)); if (!row || batchRunning) return;
   const fl = batchFilesOf(row); const idx = batchRows.indexOf(row);
-  const rows = fl.map((f, i) => i === 0 ? row : { id: ++batchSeq, file: f, files: [f], state: 'wait', result: null, error: '', positionId: '', open: false, reg: null });
-  row.files = [fl[0]]; row.file = fl[0]; row.state = 'wait'; row.result = null; row.error = ''; row.merge = false;
+  const rows = fl.map((f, i) => i === 0 ? row : { id: ++batchSeq, file: f, files: [f], state: 'wait', result: null, error: '', positionId: '', open: false, reg: null, appliedState: 'done', noAutoGroup: true });   // 직접 푼 줄은 다시 자동으로 묶지 않아요
+  row.files = [fl[0]]; row.file = fl[0]; row.state = 'wait'; row.result = null; row.error = ''; row.merge = false; row.noAutoGroup = true; row.personName = '';
   batchRows.splice(idx, 1, ...rows); batchRender(); batchInfoRefresh(); setBatchStatus(`묶음을 풀어서 서류 ${fl.length}개가 따로 줄이 됐어요.`, 'ok');
 });
 
@@ -5325,12 +5551,22 @@ async function batchSetHired(row, hired) {   // 최종 합격 표시를 서버�
   } catch (err) { setBatchStatus(err.message || '저장하지 못했어요.', 'err'); }
 }
 
+// 점수 볼 때 보낼 서류: 서버가 한 번에 4MB까지 받아서, 넘치면 이력서 → 경력기술서 → 자기소개서 → 포트폴리오 → 기타 → 자격증·증명서 순으로 담고 나머지는 알려줘요
+const BATCH_KIND_ORDER = ['이력서', '경력기술서', '자기소개서', '포트폴리오', '기타', '자격증·증명서'];
+function batchPickForScoring(row) {
+  const all = batchFilesOf(row); row.leftOut = [];
+  if (all.reduce((n, f) => n + f.size, 0) <= PDF_MAX_BYTES) return all;
+  const rank = f => { const k = BATCH_KIND_ORDER.indexOf(batchKindOf[batchFileKey(f.name)] || '기타'); return k < 0 ? 4 : k; };
+  const sorted = all.slice().sort((a, b) => rank(a) - rank(b)); const pick = []; let sum = 0;
+  for (const f of sorted) { if (sum + f.size <= PDF_MAX_BYTES) { pick.push(f); sum += f.size; } else row.leftOut.push(f.name); }
+  return pick.length ? pick : [sorted[0]];
+}
 async function batchEvaluate(row, positionId) {
   row.state = 'run'; row.error = ''; row.positionId = positionId; batchRender();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
   try {
-    const fl = batchFilesOf(row); const multi = fl.length > 1;   // 한 사람의 서류가 여러 개면 한꺼번에 보내 통합해서 평가해요
+    const fl = batchPickForScoring(row); const multi = fl.length > 1;   // 한 사람의 서류가 여러 개면 한꺼번에 보내 통합해서 평가해요(4MB 안에서 중요한 서류부터)
     const res = await fetch((multi ? '/api/resume/analyze-multi' : '/api/resume/analyze') + '?positionId=' + encodeURIComponent(positionId) + (document.getElementById('batchUsePeers').checked ? '&peers=1' : '') + '&save=1' + (multi ? '' : '&filename=' + encodeURIComponent(fl[0].name)), { method: 'POST', headers: { 'Content-Type': multi ? 'application/octet-stream' : 'application/pdf' }, body: multi ? await batchBundleBody(fl) : row.file, signal: controller.signal });
     const data = await readJsonOrNull(res);
     if (!data) throw new Error(res.status === 413 ? '파일이 너무 커서 서버가 받지 못했어요.' : '서버가 응답하지 못했어요.');
@@ -5469,13 +5705,13 @@ batchBody.addEventListener('change', e => {
   row.picked = cb.checked; batchPickRefresh();
 });
 document.getElementById('batchPickClearBtn').addEventListener('click', () => { if (batchRecording) return; batchRows.forEach(r => { r.picked = false; }); batchRender(); });
-async function batchRecordOne(row) {
+async function batchRecordOne(row, status = '서류합격') {
   const r = row.result, cand = r.candidate || {};
   const name = String(cand.name || '').trim();
   if (!name) return { ok: false, skip: true, msg: '이력서에서 이름을 읽지 못해 기록하지 않았어요. 줄의 "서류 합격 확정"에서 이름을 직접 입력해주세요.' };
   const st = notionStatus; const opts = (st && st.options) || {};
   if (!st || !st.configured) return { ok: false, msg: (st && st.message) || '노션 연결을 확인하지 못했어요.' };
-  if (!(opts.statuses || []).includes('서류합격')) return { ok: false, msg: '노션 면접상태에 "서류합격" 선택지가 없어서 기록하지 않았어요.' };
+  if (!(opts.statuses || []).includes(status)) return { ok: false, msg: `면접상태에 "${status}" 선택지가 없어서 기록하지 않았어요.` };
   const posTeam = r.position.name.includes(' - ') ? r.position.name.split(' - ')[0].trim() : '';
   const teams = opts.teams || [];
   const team = teams.includes(posTeam) ? posTeam : (teamAliases[posTeam] && teams.includes(teamAliases[posTeam]) ? teamAliases[posTeam] : '');
@@ -5486,7 +5722,7 @@ async function batchRecordOne(row) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name, phone, team, job, channels: channel ? [channel] : [], appliedAt: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }),
-      status: '서류합격', recommendation: NOTION_REC_MAP[r.recommendation] || '', total: r.total, summary: batchSummary(r), education: cand.education || '', career: cand.career || '', force: false,
+      status, recommendation: NOTION_REC_MAP[r.recommendation] || '', total: r.total, summary: batchSummary(r), education: cand.education || '', career: cand.career || '', force: false,
       checklist: (r.checklist || []).map(x => ({ code: x.code, status: x.status, note: x.note })),
     }),
   });
@@ -5497,7 +5733,7 @@ async function batchRecordOne(row) {
     return { ok: false, skip: true, msg: `노션에 같은 사람이 있어서 건너뛰었어요${who ? ': ' + who : ''}. 새로 등록하려면 줄의 "서류 합격 확정"을 쓰세요.` };
   }
   if (!res.ok) return { ok: false, msg: data.error || '등록하지 못했어요.' };
-  row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone, team, job, status: '서류합격', interview1: '', interview2: '', smsStatus: '' };
+  row.reg = { id: data.id, url: safeNotionUrl(data.url) || '', name, phone, team, job, status, interview1: '', interview2: '', smsStatus: '' };
   batchSaveReg(row);
   let pdfMsg = '';
   if (!row.file) return { ok: true, msg: '노션에 서류 합격으로 기록했어요 (가져온 결과라 이력서 PDF는 붙이지 않았어요).' };
@@ -5509,7 +5745,7 @@ async function batchRecordOne(row) {
     }
     if (failedFiles.length) throw new Error(failedFiles.join(' / '));
   } catch (err) { pdfMsg = ` (이력서 PDF는 붙이지 못했어요: ${err.message || ''})`; }
-  return { ok: true, msg: `노션에 서류 합격으로 기록했어요${pdfMsg}.`, pdfFail: !!pdfMsg };
+  return { ok: true, msg: `${status === '서류합격' ? '서류 합격으로' : `"${status}"로`}기록했어요${pdfMsg}.`, pdfFail: !!pdfMsg };
 }
 batchRecordBtn.addEventListener('click', async () => {
   if (batchRecording) return;
@@ -5597,6 +5833,29 @@ batchBody.addEventListener('click', async e => {
   const row = batchRows.find(r => r.id === Number(tr.dataset.id));
   if (!row) return;
   if (e.target.closest('.batch-detail-btn')) { row.open = !row.open; batchRender(); return; }
+  if (e.target.closest('.batch-pass1-btn')) {   // 1차 면접 전형으로 넘겨요: 지원자로 등록(상태 1차 면접 예정자)하고 문자 보내기에 이름·연락처를 채워요
+    const nm = (row.result && row.result.candidate && row.result.candidate.name) || row.personName || '이 지원자';
+    if (!confirm(`${nm} 님을 1차 면접 전형으로 넘길까요?\n\n지원자 목록에 "1차 면접 예정자"로 등록되고, 문자 보내기 화면에 이름·연락처가 채워져요(문자는 직접 보내요).`)) return;
+    row.recording = true; row.recMsg = '1차 면접으로 넘기는 중...'; row.recErr = false; batchRender();
+    let out; try { await ensureNotionStatus(true); out = await batchRecordOne(row, '1차 면접 예정자'); } catch (err) { out = { ok: false, msg: (err && err.message) || '넘기지 못했어요.' }; }
+    row.recording = false; row.recMsg = out.msg; row.recErr = !out.ok && !out.skip; batchRender();
+    if (out.ok && row.reg) {
+      let saved = 0; for (const f of batchFilesOf(row)) { try { const r2 = await fetch('/api/applicants/' + encodeURIComponent(row.reg.id) + '/docs?filename=' + encodeURIComponent(f.name), { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: f }); if (r2.ok) saved++; } catch { /* 서류 저장 실패는 아래 안내 */ } }   // 지원자 페이지에서 PDF를 열 수 있게 서류도 저장해요
+      row.recMsg = `${out.msg} 서류 ${saved}/${batchFilesOf(row).length}개를 지원자 페이지에 저장했어요.`; batchRender();
+      setBatchStatus(`${nm} 님을 1차 면접 전형으로 넘겼어요. 문자 보내기 화면에서 면접 안내를 보내주세요.`, 'ok'); if (canEdit('send')) fillSendFormFromNotion({ id: row.reg.id, name: row.reg.name, phone: row.reg.phone, team: row.reg.team, job: row.reg.job, status: row.reg.status, interview1: '', interview2: '', smsStatus: '' }); }
+    else setBatchStatus(out.msg, out.ok ? 'ok' : 'err');
+    return;
+  }
+  if (e.target.closest('.batch-reject-btn')) {   // 서류탈락: 점수·요약 결과와 보관함의 서류 글을 바로 지워요(되돌릴 수 없어요)
+    const cand = (row.result && row.result.candidate) || {}; const nm = cand.name || row.personName || '이 지원자';
+    if (!confirm(`${nm} 님을 서류탈락으로 처리할까요?\n\n점수·요약 내용과 저장된 서류 글이 바로 지워지고 되돌릴 수 없어요. (불합격 안내 문자는 따로 보내주세요)`)) return;
+    const ok = await batchDeleteSaved(row);
+    if (!ok) { setBatchStatus('서버에서 지우지 못했어요. 잠시 후 다시 눌러주세요.', 'err'); return; }
+    if (cand.name) { try { await fetch('/api/resume-locker/by-person?' + new URLSearchParams({ name: cand.name, phone: cand.phone || '' }), { method: 'DELETE' }); } catch { /* 보관함에 없으면 그대로 */ } }
+    batchRows = batchRows.filter(r => r !== row); batchRender(); batchInfoRefresh(); batchDecorateSelect();
+    setBatchStatus(`${nm} 님을 서류탈락으로 처리하고 내용을 지웠어요.`, 'ok');
+    return;
+  }
   if (e.target.closest('.batch-reg-btn')) {
     row.open = true; batchRender();
     const d = batchBody.querySelector(`tr.batch-detail[data-id="${row.id}"]`);
@@ -5694,3 +5953,39 @@ batchRefreshCounts().then(() => { if (evalPositionSelect.value) batchLoadSaved(e
 
 // ---------- 끝까지 실행됐다는 표시 (이 줄에 도달했다면 위쪽 코드가 중간에 멈추지 않았다는 뜻이에요) ----------
 window.__appScriptCompleted = true;
+
+
+// ---------- 오늘 할 일(첫 화면 위): 오늘 면접 · 면접 제안 대기 · 과제 마감 임박 · 단계별 인원 ----------
+// 누르면 해당 화면으로 바로 가요. 볼 권한이 없는 칸은 나오지 않아요.
+async function todayLoad() {
+  const board = document.getElementById('todayBoard'); if (!board) return;
+  let d = null, oa = null;
+  try { const r = await fetch('/api/dashboard'); d = r.ok ? await r.json() : null; } catch { d = null; }
+  try { const r = await fetch('/api/offer-alerts'); oa = r.ok ? await r.json() : null; } catch { oa = null; }
+  if (!d) { board.hidden = true; return; }
+  const cards = []; const wd = '일월화수목금토';
+  const [yy, mo, dd] = d.today.split('-').map(Number); const dow = new Date(Date.UTC(yy, mo - 1, dd)).getUTCDay(); document.getElementById('todayDate').textContent = `${mo}월 ${dd}일 (${wd[dow]})`;   // 한국 날짜 그대로(브라우저 시간대와 상관없이)
+  if (d.todayInterviews) cards.push(`<div class="today-card"><h4>📅 오늘 면접</h4><div class="today-num">${d.todayInterviews.length}건</div>${d.todayInterviews.length ? `<ul>${d.todayInterviews.slice(0, 6).map(x => `<li>${escapeHtml(x.time)} ${escapeHtml(x.name)} <span class="ap-sub">${escapeHtml([x.team, x.round].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>` : ''}<button type="button" class="link-btn" data-go="sched">일정 등록·목록 열기</button></div>`);
+  if (oa && oa.enabled) cards.push(`<div class="today-card"><h4>📨 면접 제안 대기</h4><div class="today-num">${(oa.alerts || []).length}명</div>${(oa.alerts || []).length ? `<ul>${oa.alerts.slice(0, 5).map(x => `<li>${escapeHtml(x.name || '')} <span class="ap-sub">${escapeHtml(x.team || '')}</span></li>`).join('')}</ul><button type="button" class="link-btn" data-go="offers">제안 목록 열기</button>` : ''}</div>`);
+  if (d.tasksDue) cards.push(`<div class="today-card"><h4>⏰ 과제 마감 임박 (3일 안)</h4><div class="today-num">${d.tasksDue.length}명</div>${d.tasksDue.length ? `<ul>${d.tasksDue.slice(0, 6).map(x => `<li><button type="button" class="link-btn" data-go="person" data-name="${escapeHtml(x.name)}">${escapeHtml(x.name)}</button> <span class="${x.overdue ? 'today-late' : 'ap-sub'}">${x.overdue ? '마감 지남 ' : ''}${escapeHtml(x.dueAt.slice(5).replace('-', '/'))}</span></li>`).join('')}</ul>` : ''}</div>`);
+  if (d.statusCounts) { const total = d.statusCounts.reduce((n, x) => n + x.count, 0); cards.push(`<div class="today-card"><h4>👥 단계별 인원 (총 ${total}명)</h4><div class="today-steps">${d.statusCounts.map(x => `<button type="button" class="today-step" data-go="status" data-status="${escapeHtml(x.status)}">${escapeHtml(x.status)}<b>${x.count}</b></button>`).join('')}</div></div>`); }
+  document.getElementById('todayBody').innerHTML = cards.join('');
+  board.hidden = !cards.length;
+  try { if (localStorage.getItem('todayFolded') === '1') { board.classList.add('folded'); document.getElementById('todayToggle').textContent = '펼치기'; } } catch { /* 저장 안 돼도 괜찮아요 */ }
+}
+document.getElementById('todayToggle').addEventListener('click', () => {
+  const b = document.getElementById('todayBoard'); const f = b.classList.toggle('folded'); document.getElementById('todayToggle').textContent = f ? '펼치기' : '접기';
+  try { localStorage.setItem('todayFolded', f ? '1' : '0'); } catch { /* 괜찮아요 */ }
+});
+document.getElementById('todayBody').addEventListener('click', async e => {
+  const b = e.target.closest('[data-go]'); if (!b) return; const go = b.dataset.go;
+  if (go === 'sched') openScheduleView();
+  else if (go === 'offers') oaOpen();
+  else if (go === 'status' || go === 'person') {
+    showTab('interview'); if (apView !== 'list') apSetView('list');
+    if (apStatus.options.length <= 1) { try { await loadApplicants(true); } catch { /* 아래에서 다시 불러와요 */ } }   // 상태 선택지를 먼저 채워요
+    if (go === 'status') { apSearch.value = ''; if ([...apStatus.options].some(o => o.value === b.dataset.status)) apStatus.value = b.dataset.status; }
+    else { apStatus.value = 'all'; apSearch.value = b.dataset.name || ''; }
+    loadApplicants(true);
+  }
+});

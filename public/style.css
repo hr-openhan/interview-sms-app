@@ -30,6 +30,9 @@ body {
 }
 /* 면접 관리 탭: 옆 여백을 줄이고 화면 폭을 넓게 써요(아주 넓은 모니터에서는 1680px까지) */
 body.wide-tab .wrap { max-width: 1680px; padding-left: 20px; padding-right: 20px; }
+/* 모든 탭을 같은 폭으로 맞춰서 탭을 바꿀 때 머리글(제목·탭 버튼)이 움직이지 않게 해요. 글이 긴 입력 화면은 안쪽 카드에서 폭을 잡아요 */
+body .wrap, body.wide-tab .wrap { max-width: 1280px; padding-left: 24px; padding-right: 24px; }
+/* 모든 화면이 머리글·오늘 할 일과 같은 폭(왼쪽 끝 맞춤)을 써요 */
 
 .topbar {
   display: flex;
@@ -2229,3 +2232,116 @@ body.apd-open .user-dock, body.apd-open #userDock { display: none !important; }
 .oa-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 #oaMsg:empty { display: none; }
 body.apd-open .user-dock { display: none !important; }
+/* 묶은 서류 목록(누르면 펼침) */
+.batch-files summary { cursor: pointer; }
+.batch-files ul { margin: 4px 0 0; padding-left: 18px; }
+.batch-kind { display: inline-block; padding: 0 6px; margin-right: 2px; border-radius: 999px; background: #f1ede4; font-size: 11px; }
+/* 전형 넘기기 버튼(1차 면접·서류탈락): 좁은 화면에서도 칸 안에서 줄바꿈 */
+.batch-pass1-btn, .batch-reject-btn { display: inline-block; margin: 2px 4px 2px 0; max-width: 100%; white-space: normal; }
+@media (max-width: 760px) {
+  .batch-table tr.batch-row > td:last-child { flex-wrap: wrap; justify-content: flex-start; }   /* 버튼이 늘어도 칸 안에서 다음 줄로 */
+}
+@media (max-width: 760px) {
+  /* 버튼 칸은 카드 모양에서 버튼이 많아도 여러 줄로 감싸요(가로로 넘치지 않게) */
+  .batch-table td:last-child { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+}
+
+/* 지원자 페이지: 서류 목록·올리기 */
+.apd-docs { margin: 4px 0 6px; padding-left: 18px; }
+.apd-docs li { margin: 2px 0; overflow-wrap: anywhere; }
+.apd-doc-up { display: inline-block; cursor: pointer; margin: 2px 0 6px; }
+#apdIvHost:empty { display: none; }
+
+/* 채용과제 */
+.task-manage { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; }
+.task-items { list-style: none; padding: 0; margin: 6px 0 10px; }
+.task-items li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.task-body { margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.task-row .field { flex: 1 1 140px; min-width: 0; }
+.task-row input, .task-row select, .apd-task textarea, .task-form textarea, .task-form input { max-width: 100%; box-sizing: border-box; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+
+/* ===================== 최종 정돈(-49): 보기 좋고 일관되게 ===================== */
+/* 보기 바꾸기·옮기기 버튼도 공고 관리의 알약 버튼과 같은 모양 */
+.ap-viewswitch { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.ap-viewswitch .sub-btn, #lnBox .sub-btn { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); font: inherit; font-size: 13.5px; cursor: pointer; color: var(--ink); }
+.ap-viewswitch .sub-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+/* 면접 관리 필터: 다른 입력칸과 같은 모양 */
+.ap-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.ap-filters select, .ap-filters input { padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font: inherit; font-size: 14px; }
+.ap-filters select:focus, .ap-filters input:focus { outline: none; border-color: var(--accent); }
+/* 옮기기 안내 상자 */
+#lnBox, #lnDone { background: var(--paper); border: 1px dashed var(--line) !important; border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+/* 지원자 목록 버튼 칸: 버튼이 가지런히 줄바꿈 */
+@media (min-width: 761px) {
+  .ap-table tr.ap-row td:last-child { display: table-cell; text-align: right; vertical-align: top; }   /* 넓은 화면에서는 표 칸 그대로(아래 선이 어긋나지 않게), 버튼은 오른쪽 정렬 */
+  .ap-table tr.ap-row td:last-child > * { margin: 2px 0 2px 6px; }
+}
+/* 상단 메뉴: 좁은 화면에서 글자가 두 줄로 깨지지 않게 */
+.tab-btn { white-space: nowrap; }
+@media (max-width: 560px) {
+  .tabs { margin-left: 0; width: 100%; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+  .tab-btn { padding: 7px 12px; font-size: 13px; flex: 0 0 auto; }
+}
+/* 양식 관리: 문자 양식·채용과제 양식을 같은 카드 모양으로 */
+.manage-view > .manage-title { font-size: 18px; margin: 0 0 6px; }
+/* 지원자 페이지 오른쪽 탭 */
+.apd-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.apd-tab { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); font: inherit; font-size: 13.5px; cursor: pointer; color: var(--ink); }
+.apd-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.apd-tab .apd-tab-sub { font-weight: 400; opacity: .85; margin-left: 4px; font-size: 12px; }
+.apd-pane[hidden] { display: none !important; }
+.apd-doc-up { padding: 4px 10px; border: 1px dashed var(--line); border-radius: 999px; text-decoration: none; }
+
+/* 문자 보내기: 매일 보는 "오늘의 면접"을 일정 칸 맨 위로 */
+#scheduleView:not([hidden]) { display: flex; flex-direction: column; }
+#scheduleView .schedule-overview-panel { order: -1; }
+/* 지원자 목록 칸 너비: 버튼 칸을 넉넉히, 날짜·점수는 좁게 */
+@media (min-width: 761px) {
+  .ap-table { table-layout: fixed; width: 100%; }
+  .ap-table th:nth-child(1) { width: 13%; } .ap-table th:nth-child(2) { width: 15%; } .ap-table th:nth-child(3) { width: 14%; }
+  .ap-table th:nth-child(4), .ap-table th:nth-child(5) { width: 11%; } .ap-table th:nth-child(6) { width: 9%; } .ap-table th:nth-child(7) { width: 27%; }
+}
+.ap-table select.ap-status { padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); font: inherit; font-size: 13px; color: var(--ink); }
+
+/* 오늘 할 일 */
+.today-board { border: 1px solid var(--line); border-radius: 12px; background: #fffdf8; padding: 12px 16px; margin: 0 0 18px; }
+.today-head { display: flex; align-items: center; gap: 8px; }
+.today-head .link-btn { margin-left: auto; }
+.today-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
+.today-board.folded .today-body { display: none; }
+.today-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; min-width: 0; }
+.today-card h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.today-num { font-size: 22px; font-weight: 800; }
+.today-card ul { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; }
+.today-card li { padding: 2px 0; overflow-wrap: anywhere; }
+.today-card button.link-btn { padding: 0; }
+.today-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.today-step { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: var(--paper); font: inherit; font-size: 12.5px; cursor: pointer; }
+.today-step b { margin-left: 4px; }
+.today-late { color: #b3261e; font-weight: 700; }
+
+.h-sub { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+
+/* 면접 평가표 */
+.sc-summaries { display: grid; gap: 8px; margin-bottom: 10px; }
+.sc-sum { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--paper); }
+.sc-avg { font-size: 18px; color: var(--accent); }
+.sc-bars { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.sc-table { margin: 6px 0 12px; }
+.sc-form { border-top: 1px solid var(--line); padding-top: 10px; }
+.sc-row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.sc-label { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
+.sc-pts { display: flex; gap: 4px; }
+.sc-pt { position: relative; }
+.sc-pt input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sc-pt span { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; background: #fff; }
+.sc-pt input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.sc-pt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 지원자 페이지 머리: 상태·문자·일정 */
+.apd-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; margin-right: 10px; }
+.apd-st-label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.apd-st-label select { min-width: 0; max-width: 160px; }
+@media (max-width: 760px) { .apd-actions { margin: 6px 0 0; width: 100%; } }
