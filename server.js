@@ -208,10 +208,33 @@ const MENUS = [
   { key: 'history', label: '발송 이력' },
   { key: 'schedule', label: '면접 일정' },
   { key: 'resume', label: '이력서 검토·공고' },
+  { key: 'interviews', label: '면접 관리' },
   { key: 'templates', label: '양식 관리' },
 ];
 const LEVELS = { none: 0, view: 1, edit: 2 };
 const ALL_EDIT = Object.fromEntries(MENUS.map(m => [m.key, 'edit']));
+// ---------- 팀장(자기 팀 면접 기록만 보기) ----------
+// 팀장은 "이름@openhan.kr" 계정으로 로그인하면 자동으로 입장하고, 자기 팀의 면접 일정·면접 관리만 읽을 수 있어요(수정·발송·이력서 점수·발송 이력은 못 봐요).
+// 전체 권한(소유주)은 환경변수 OWNER_EMAIL(한스·제나·카라)로 지정하고, 팀장이 아닌 사람은 권한 관리에서 따로 추가해요.
+// 여기에 없는 팀(경영지원팀·그로잉업팀 등)은 팀장이 없어서 소유주만 볼 수 있어요.
+const TEAM_LEAD_DOMAIN = 'openhan.kr';
+const TEAM_LEADS = {
+  nicole: ['온라인팀', '마케팅팀', '글로벌비즈니스팀'],
+  loi: ['SCM팀'],
+  henry: ['FC팀'],
+  marinette: ['와우서비스팀'],
+  kevin: ['브이팀'],
+  anna: ['제품디자인팀', '제품생산팀'],
+};
+// 이메일 → 담당 팀 목록. 도메인이 다르거나 매핑에 없으면 null
+function leadTeamsOf(email) {
+  const e = String(email || '').trim().toLowerCase(); const at = e.lastIndexOf('@');
+  if (at <= 0 || e.slice(at + 1) !== TEAM_LEAD_DOMAIN) return null;
+  const t = TEAM_LEADS[e.slice(0, at)];
+  return t ? [...t] : null;
+}
+// 팀장이면 그 팀의 것만 true. 소유주·일반 사용자(teams 없음)는 제한 없음. 팀 이름이 비어 있으면 팀장에게는 안 보여요.
+const teamAllowed = (user, team) => !user || !user.teams || user.teams.includes(String(team || '').trim());
 function normalizePerms(p) {
   const out = {};
   for (const m of MENUS) out[m.key] = p && Object.prototype.hasOwnProperty.call(LEVELS, p[m.key]) ? p[m.key] : 'none';
@@ -291,6 +314,8 @@ async function resolveUser(email) {
   if (isOwnerEmail(e)) {
     return { email: e, name: (stored && stored.name) || e.split('@')[0], role: 'owner', perms: { ...ALL_EDIT } };
   }
+  const lead = leadTeamsOf(e);   // 팀장은 저장된 사용자가 아니어도 입장하고, 저장된 권한과 겹쳐도 더 좁은 팀장 권한을 써요
+  if (lead) return { email: e, name: (stored && stored.name) || e.split('@')[0], role: 'teamlead', teams: lead, perms: { ...normalizePerms({}), schedule: 'view', interviews: 'view' } };
   if (!stored || stored.active === false) return null;
   return { email: e, name: stored.name || e.split('@')[0], role: 'member', perms: normalizePerms(stored.perms) };
 }
@@ -308,7 +333,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-33';
+const APP_VERSION = '2026.10.21-35';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -385,18 +410,18 @@ const PERMISSION_RULES = [
   R('PUT',    /^\/api\/resume\/results\/[^/]+$/,   [['resume', 'edit']]),
   R('DELETE', /^\/api\/resume\/results(\/[^/]+)?$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/notion\/attach-resume$/,    [['resume', 'edit']]),
-  R('GET',    /^\/api\/notion\/status$/,          [['send', 'view'], ['resume', 'view']]),
-  R('GET',    /^\/api\/notion\/applicants$/,      [['send', 'view'], ['resume', 'view']]),
+  R('GET',    /^\/api\/notion\/status$/,          [['send', 'view'], ['resume', 'view'], ['interviews', 'view']]),
+  R('GET',    /^\/api\/notion\/applicants$/,      [['send', 'view'], ['resume', 'view'], ['interviews', 'view']]),
   R('PATCH',  /^\/api\/notion\/applicants\/[0-9a-fA-F-]+$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/notion\/evaluate-applicant$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/notion\/record-score$/,     [['resume', 'edit']]),
   R('GET',    /^\/api\/notion\/benchmark$/,        [['resume', 'view']]),
   R('POST',   /^\/api\/notion\/register-applicant$/, [['resume', 'edit']]),
-  R('GET',    /^\/api\/interview\/bank$/,          [['schedule', 'view'], ['resume', 'view']]),
+  R('GET',    /^\/api\/interview\/bank$/,          [['schedule', 'view'], ['resume', 'view'], ['interviews', 'view']]),
   R('POST',   /^\/api\/interview\/questions$/,     [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/interview\/import$/,        [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/interview\/save-to-notion$/, [['schedule', 'edit'], ['resume', 'edit']]),
-  R('GET',    /^\/api\/interview\/card$/,          [['schedule', 'view'], ['resume', 'view']]),
+  R('GET',    /^\/api\/interview\/card$/,          [['schedule', 'view'], ['resume', 'view'], ['interviews', 'view']]),
   R('GET',    /^\/api\/postings\/stats$/,          [['resume', 'view']]),
   R('POST',   /^\/api\/interview\/save-answers$/,  [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/logout$/,                  'authed'),
@@ -483,7 +508,7 @@ app.get('/api/me', ah(async (req, res) => {
   const u = a.user;
   res.json({
     mode: AUTH_MODE, authed: true, version: APP_VERSION,
-    email: u.email, name: u.name, role: u.role, perms: u.perms,
+    email: u.email, name: u.name, role: u.role, perms: u.perms, teams: u.teams || null,
     canManage: AUTH_MODE === 'google' && u.role === 'owner',
     menus: MENUS,
   });
@@ -1159,7 +1184,8 @@ function nextScheduleId(list) {
 
 // 면접 일정 목록 (면접일시 오름차순)
 app.get('/api/schedules', ah(async (req, res) => {
-  const list = (await loadSchedules()).sort((a, b) => (a.interviewAt || '').localeCompare(b.interviewAt || ''));
+  const user = req.auth && req.auth.user;
+  const list = (await loadSchedules()).filter(sc => teamAllowed(user, sc.team)).sort((a, b) => (a.interviewAt || '').localeCompare(b.interviewAt || ''));   // 팀장은 자기 팀 일정만(서버가 걸러요)
   res.json(list);
 }));
 
@@ -3687,6 +3713,7 @@ app.get('/api/interview/card', requireNotion, ah(async (req, res) => {
     if (!NOTION_ID_RE.test(id)) return res.status(400).json({ error: '노션 지원자를 선택해주세요.' });
     const page = await notionRequest('GET', `/v1/pages/${id}`);
     const basis = cardToResumeBasis(page);
+    if (!teamAllowed(req.auth && req.auth.user, basis.team)) return forbidden(res, '이 지원자는 담당 팀이 아니라서 볼 수 없어요.');   // 팀장은 자기 팀 지원자만
     const out = { success: true, applicant: { id: basis.id, name: basis.name, team: basis.team, job: basis.job, url: basis.url, summary: basis.summary.slice(0, 1900), education: basis.education, career: basis.career }, table: { found: false, rows: [], note: '' } };
     let dbId = null;
     try { dbId = await findQuestionDb(id); } catch { out.table.note = '카드 본문을 읽지 못해 채용 문항 표를 찾지 못했어요.'; }
@@ -4392,8 +4419,12 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     const month = /^(20\d{2})-(0[1-9]|1[0-2])$/.test(monthRaw) ? monthRaw : '';   // 면접이 있는 달(YYYY-MM)
     if (monthRaw && !month) return res.status(400).json({ error: '월은 YYYY-MM 형식(예: 2026-10)으로 골라주세요.' });
     const filters = [];
+    const leadUser = req.auth && req.auth.user; const leadTeams = leadUser && leadUser.teams ? leadUser.teams : null;   // 팀장이면 요청이 뭐든 자기 팀만(화면이 필터를 안 걸어도, 주소를 직접 불러도)
     if (q) filters.push({ property: '이름', title: { contains: q } });
-    if (team) filters.push({ property: '팀명', select: { equals: team } });
+    if (leadTeams) {
+      if (team && !leadTeams.includes(team)) return res.json({ applicants: [], hasMore: false, nextCursor: '', scheduleChecked: false, month: '', byTeam: null, truncated: false });   // 담당이 아닌 팀을 요청하면 빈 결과
+      filters.push({ or: (team ? [team] : leadTeams).map(t => ({ property: '팀명', select: { equals: t } })) });
+    } else if (team) filters.push({ property: '팀명', select: { equals: team } });
     if (status === 'active') filters.push({ or: NOTION_ACTIVE_STATUSES.map(s => ({ property: '면접상태', select: { equals: s } })) });
     else if (status && status !== 'all') filters.push({ property: '면접상태', select: { equals: status } });
     const size = Math.max(1, Math.min(parseInt(req.query.pageSize, 10) || 30, 100));
