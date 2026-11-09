@@ -11,7 +11,7 @@
 //   manifest.json         지원자 수·상태별 인원·파일 수·실패한 항목·검증 결과 (백업이 빠짐없는지 확인할 때 보세요)
 //   applicants.json       지원자마다 속성 전체 + 정리한 값 + 구분(group) + 본문 글 + 질문·답변 표 + 파일 목록
 //   applicants.csv        엑셀에서 바로 열려요(한 줄 = 한 명)
-//   진행중.csv · 입사(합격자).csv · 불합격.csv · 기타(확인 필요).csv   구분별로 나눈 표
+//   진행중.csv · 입사(합격자).csv · 퇴사(계약종료).csv · 탈락·불참.csv · 기타(확인 필요).csv · 참고자료.csv   구분별로 나눈 표(참고자료는 지원자가 아닌 면접 질문지·인재상 같은 페이지)
 //   files/<이름>_<번호>/  첨부 파일(이력서 PDF 등)
 //
 // ⚠ 이 폴더에는 이름·전화번호·면접 평가 같은 개인정보가 들어 있어요. GitHub에 올리지 말고 안전한 곳에 보관하세요.
@@ -95,8 +95,11 @@ async function readTable(dbId) {   // "채용 문항" 같은 인라인 표: 행�
   return rows.map(r => Object.fromEntries(Object.entries(r.properties || {}).map(([k, v]) => [k, propValue(v)])));
 }
 const safe = s => String(s || '').replace(/[\u0000-\u001f\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 40) || '이름없음';
-const ACTIVE = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정'], REJECT = ['불합격', '탈락 확정'];
-const groupOf = a => a.hireDate ? '입사(합격자)' : ACTIVE.includes(a.status) ? '진행 중' : REJECT.includes(a.status) ? '불합격' : '기타(확인 필요)';
+// 실제 노션 「진행중 채용」의 면접상태 9개: 채용 과제·1차 면접 예정자·서류합격·2차 면접 예정·탈락 후보·불참·탈락 확정·계약종료&퇴사·채용
+const ACTIVE = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정', '탈락 후보'], OUT = ['탈락 확정', '불참'];
+// 이 DB에는 지원자가 아닌 참고 페이지(면접 질문지·오픈한 인재상·대학 순위·채용과제 리스트)도 들어 있어요: 팀명이 "면접정보"이거나, 상태·전화번호·팀이 모두 빈 페이지
+const isReference = a => a.team === '면접정보' || (!a.status && !a.phone && !a.team);
+const groupOf = a => isReference(a) ? '참고 자료(지원자 아님)' : (a.status === '채용' || a.hireDate) ? '입사(합격자)' : a.status === '계약종료&퇴사' ? '퇴사(계약종료)' : ACTIVE.includes(a.status) ? '진행 중' : OUT.includes(a.status) ? '탈락·불참' : '기타(확인 필요)';
 const csvCell = v => { const s = Array.isArray(v) ? v.join(' / ') : v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
 // ---- 실행 ----
@@ -106,14 +109,14 @@ const propNames = Object.keys(schema.properties || {});
 const pages = await allPages('POST', `/v1/databases/${DB_ID}/query`, {});
 const listTruncated = !!pages.truncated;   // 노션이 "더 있어요"라고 했는데 이어 읽을 수 없었으면 true
 const etaMin = Math.ceil(pages.length * 6 * (GAP_MS / 1000) / 60);   // 지원자 한 명당 요청 약 6건(본문·하위 블록·질문 표·파일)
-console.log(`지원자 ${pages.length}명을 찾았어요. 본문·표·파일을 읽어요. 노션의 속도 제한(초당 약 3건) 때문에 약 ${etaMin}분 걸려요. 중간에 끄지 마세요(끄면 처음부터 다시 해야 해요).`);
+console.log(`페이지 ${pages.length}개를 찾았어요(지원자와 면접 참고 자료가 함께 있어요). 본문·표·파일을 읽어요. 노션의 속도 제한(초당 약 3건) 때문에 약 ${etaMin}분 걸려요. 중간에 끄지 마세요(끄면 처음부터 다시 해야 해요).`);
 fs.mkdirSync(path.join(outDir, 'files'), { recursive: true, mode: 0o700 });
 const applicants = [], errors = []; let fileCount = 0, fileBytes = 0;
 let n = 0;
 for (const pg of pages) {
   n++; const P = pg.properties || {}; const props = Object.fromEntries(Object.entries(P).map(([k, v]) => [k, propValue(v)]));
   const nameProp = Object.entries(P).find(([, v]) => v.type === 'title'); const name = nameProp ? rich(nameProp[1].title) : '';
-  const a = { id: pg.id, url: pg.url, name, status: props['면접상태'] || '', hireDate: props['입사일'] || '', createdAt: pg.created_time, editedAt: pg.last_edited_time, archived: !!pg.archived, properties: props, body: '', tables: [], files: [], errors: [] };
+  const a = { id: pg.id, url: pg.url, name, status: props['면접상태'] || '', team: props['팀명'] || '', phone: props['전화번호'] || '', hireDate: props['입사일'] || '', createdAt: pg.created_time, editedAt: pg.last_edited_time, archived: !!pg.archived, properties: props, body: '', tables: [], files: [], errors: [] };
   a.group = groupOf(a);
   try {
     const body = await readBlocks(pg.id, 0, {}); a.body = body.lines.join('\n');
@@ -142,21 +145,22 @@ for (const pg of pages) {
 const cols = ['구분', '이름', '면접상태', '입사일', ...propNames.filter(k => !['이름', '면접상태', '입사일'].includes(k)), '노션 주소', '본문 글자수', '첨부 파일 수', '질문·답변 표 행 수', '읽기 오류'];
 const toRow = a => [a.group, a.name, a.status, a.hireDate, ...propNames.filter(k => !['이름', '면접상태', '입사일'].includes(k)).map(k => a.properties[k]), a.url, a.body.length, a.files.length, a.tables.reduce((s, t) => s + t.rows.length, 0), a.errors.join(' | ')];
 const csv = list => '\ufeff' + [cols, ...list.map(toRow)].map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
-const GROUPS = ['진행 중', '입사(합격자)', '불합격', '기타(확인 필요)'];
+const GROUPS = ['진행 중', '입사(합격자)', '퇴사(계약종료)', '탈락·불참', '기타(확인 필요)', '참고 자료(지원자 아님)'];
+const GROUP_FILE = { '진행 중': '진행중', '입사(합격자)': '입사(합격자)', '퇴사(계약종료)': '퇴사(계약종료)', '탈락·불참': '탈락·불참', '기타(확인 필요)': '기타(확인 필요)', '참고 자료(지원자 아님)': '참고자료' };
 fs.writeFileSync(path.join(outDir, 'applicants.json'), JSON.stringify(applicants, null, 1), { mode: 0o600 });
-fs.writeFileSync(path.join(outDir, 'applicants.csv'), csv(applicants), { mode: 0o600 });
-for (const g of GROUPS) fs.writeFileSync(path.join(outDir, g.replace(/\(.*\)/, m => m) + '.csv'), csv(applicants.filter(a => a.group === g)), { mode: 0o600 });
+fs.writeFileSync(path.join(outDir, 'applicants.csv'), csv(applicants.filter(a => !isReference(a))), { mode: 0o600 });   // 지원자만(참고 자료는 참고자료.csv 와 applicants.json 에 있어요)
+for (const g of GROUPS) fs.writeFileSync(path.join(outDir, GROUP_FILE[g] + '.csv'), csv(applicants.filter(a => a.group === g)), { mode: 0o600 });
 const byStatus = {}; for (const a of applicants) byStatus[a.status || '(상태 없음)'] = (byStatus[a.status || '(상태 없음)'] || 0) + 1;
 const byGroup = Object.fromEntries(GROUPS.map(g => [g, applicants.filter(a => a.group === g).length]));
-const manifest = { createdAt: new Date().toISOString(), source: 'notion', databaseId: DB_ID, applicantCount: applicants.length, expectedCount: pages.length, complete: applicants.length === pages.length && !listTruncated, listTruncated, byStatus, byGroup, groupRule: '입사일 있음 → 입사(합격자) / 서류합격·1차 면접 예정자·채용 과제·2차 면접 예정 → 진행 중 / 불합격·탈락 확정 → 불합격 / 그 밖 → 기타(확인 필요)', files: fileCount, fileBytes, withBody: applicants.filter(a => a.body).length, withTables: applicants.filter(a => a.tables.length).length, archivedCount: applicants.filter(a => a.archived).length, errorCount: errors.length, errors, properties: propNames };
+const manifest = { createdAt: new Date().toISOString(), source: 'notion', databaseId: DB_ID, applicantCount: applicants.length, expectedCount: pages.length, complete: applicants.length === pages.length && !listTruncated, listTruncated, byStatus, byGroup, groupRule: '팀명이 "면접정보"이거나 상태·전화번호·팀이 모두 비어 있으면 → 참고 자료(지원자 아님) / 면접상태 "채용" 또는 입사일 있음 → 입사(합격자) / 계약종료&퇴사 → 퇴사(계약종료) / 서류합격·1차 면접 예정자·채용 과제·2차 면접 예정·탈락 후보 → 진행 중 / 탈락 확정·불참 → 탈락·불참 / 그 밖 → 기타(확인 필요)', referenceCount: applicants.filter(isReference).length, personCount: applicants.filter(a => !isReference(a)).length, files: fileCount, fileBytes, withBody: applicants.filter(a => a.body).length, withTables: applicants.filter(a => a.tables.length).length, archivedCount: applicants.filter(a => a.archived).length, errorCount: errors.length, errors, properties: propNames };
 fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 1), { mode: 0o600 });
 fs.writeFileSync(path.join(outDir, 'README.txt'), `노션 지원자 DB 백업 (${manifest.createdAt})
-지원자 ${applicants.length}명 · 첨부 파일 ${fileCount}개 · 읽기 오류 ${errors.length}건
+지원자 ${manifest.personCount}명 · 참고 자료 ${manifest.referenceCount}개 · 첨부 파일 ${fileCount}개 · 읽기 오류 ${errors.length}건
 
 ■ 파일
  manifest.json     지원자 수, 상태별·구분별 인원, 읽기 오류 목록 — 백업이 빠짐없는지 여기서 확인하세요.
  applicants.json   모든 정보(속성 전체·본문 글·"채용 문항" 표·파일 목록).
- applicants.csv    엑셀로 바로 열려요. 진행중.csv·입사(합격자).csv·불합격.csv·기타(확인 필요).csv 는 구분별로 나눈 표예요.
+ applicants.csv    엑셀로 바로 열려요. 진행중.csv·입사(합격자).csv·퇴사(계약종료).csv·탈락·불참.csv·기타(확인 필요).csv 는 구분별로 나눈 표예요. applicants.csv 는 지원자만이고, 면접 질문지·오픈한 인재상 같은 지원자가 아닌 페이지는 참고자료.csv 와 applicants.json 에 따로 있어요.
  files/            이력서 PDF 등 첨부 파일.
 
 ■ 구분(group) 규칙 — 제가 정한 규칙이에요. 맞지 않으면 applicants.json 의 status·hireDate 로 직접 나누세요.
@@ -168,7 +172,7 @@ fs.writeFileSync(path.join(outDir, 'README.txt'), `노션 지원자 DB 백업 ($
  - 읽기 오류가 있으면 manifest.json 의 errors 를 보고 그 사람만 노션에서 직접 확인하세요.
 `, { mode: 0o600 });
 console.log(`\n✓ 백업 완료 → ${outDir}/`);
-console.log(`  지원자 ${applicants.length}명 (${GROUPS.map(g => `${g} ${byGroup[g]}`).join(' · ')})`);
+console.log(`  지원자 ${manifest.personCount}명 + 참고 자료 ${manifest.referenceCount}개 (${GROUPS.map(g => `${g} ${byGroup[g]}`).join(' · ')})`);
 console.log(`  첨부 파일 ${fileCount}개 (${(fileBytes / 1048576).toFixed(1)}MB) · 질문·답변 표가 있는 지원자 ${manifest.withTables}명`);
 console.log(`  읽기 오류 ${errors.length}건${errors.length ? ' — manifest.json 의 errors 를 확인하세요' : ''}`);
 console.log('  ⚠ 개인정보가 들어 있어요. GitHub에 올리지 마세요.');
