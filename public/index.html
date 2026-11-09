@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-39">
+<html lang="ko" data-app-version="2026.10.21-43">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -917,6 +917,7 @@
   <div id="userDock" class="user-dock" hidden>
     <span id="dockName" class="dock-name"></span>
     <span id="dockRole" class="dock-role"></span>
+    <button id="offerAlertBtn" class="dock-btn dock-alert" type="button" hidden>📨 면접 제안 대기 <span id="offerAlertCount"></span></button>
     <button id="openAdminBtn" class="dock-btn" type="button" hidden>⚙ 권한 관리</button>
     <button id="dockLogoutBtn" class="dock-btn" type="button">로그아웃</button>
   </div>
@@ -1020,6 +1021,7 @@
           <label>면접 단계 <select class="iq-stage"><option value="1차">1차 (팀장·실무진)</option><option value="2차">2차 (임원)</option></select></label>
           <label>면접 시간 <select class="iq-minutes"><option value="30">30분</option><option value="45">45분</option><option value="60">60분</option></select></label>
           <label class="check-chip"><input type="checkbox" class="iq-with-resume" checked /> 노션 카드의 이력서 PDF도 AI에게 보여주기</label>
+          <div class="iq-pdf-box"><label class="iq-pdf-label"><strong>이력서 PDF 올리기</strong> <span class="ap-sub">(선택, 최대 2개 · 질문이 이 이력서의 내용을 짚어 나와요)</span><input type="file" class="iq-pdf" accept="application/pdf,.pdf" multiple /></label><div class="iq-pdf-list ap-sub"></div><span class="manage-hint" style="margin:0">올린 PDF는 질문을 만드는 데만 쓰고 <strong>저장하지 않아요.</strong> AI 서비스(Anthropic)로 전달돼요. "API 없이"에서는 쓰이지 않아요.</span></div>
           <span class="manage-hint iq-resume-note" style="margin:0">PDF는 최대 2개, AI 서비스(Anthropic)로 전달돼요. 원치 않으면 끄세요. "API 없이"에서는 쓰이지 않아요.</span>
           <details class="iq-extra"><summary>추가 자료 붙여넣기 (자기소개서·포트폴리오 내용·면접관 메모)</summary><textarea class="iq-extra-text" rows="4" maxlength="8000" placeholder="질문에 참고할 글을 붙여넣으세요(최대 8000자). 서버에 저장하지 않아요." aria-label="추가 자료"></textarea><span class="manage-hint iq-extra-count" style="margin:0">0 / 8000자</span></details>
         </div>
@@ -1034,6 +1036,29 @@
         <div class="iq-result" hidden></div>
       </div>
   </template>
+  <div id="offerAlertModal" class="ap-detail" hidden role="dialog" aria-modal="true" aria-labelledby="oaTitle">
+    <div class="ap-detail-backdrop" data-oaclose="1"></div>
+    <div class="ap-detail-panel oa-panel">
+      <div class="ap-detail-head"><h2 id="oaTitle">면접 제안 대기</h2><span class="ap-sub">서류 합격 확정이 된 사람이에요. 면접 제안 문자를 보내고 나면 "처리됨"을 눌러주세요.</span><button type="button" id="oaClose" class="link-btn">닫기</button></div>
+      <p id="oaMsg" class="status" aria-live="polite"></p>
+      <div id="oaList"></div>
+    </div>
+  </div>
+  <div id="apDetail" class="ap-detail" hidden role="dialog" aria-modal="true" aria-labelledby="apdTitle">
+    <div class="ap-detail-backdrop" data-close="1"></div>
+    <div class="ap-detail-panel">
+      <div class="ap-detail-head"><h2 id="apdTitle"></h2><span id="apdStatus" class="ap-sub"></span><button type="button" id="apdClose" class="link-btn">닫기</button></div>
+      <div id="apdLeadNote" class="manage-hint" hidden></div>
+      <div class="ap-detail-body">
+        <section class="ap-detail-left" aria-label="지원자 정보"><h3>지원자 정보</h3><div id="apdInfo"></div><h3>이력서 평가</h3><div id="apdCard" class="ap-sub">불러오는 중...</div></section>
+        <section class="ap-detail-right" aria-label="면접 기록"><h3>면접 기록</h3><p id="apdMsg" class="status" aria-live="polite"></p><div id="apdNotes"></div>
+          <h4>의견 댓글</h4><div id="apdComments"></div>
+          <div id="apdDeleteBox" class="apd-delete-box" hidden><button type="button" id="apdDeleteAll" class="link-btn apd-delete-all">이 지원자의 면접 기록 모두 지우기</button><span class="ap-sub">개인정보라서 필요 없어지면 지워주세요. 지우면 되돌릴 수 없어요.</span></div>
+          <div id="apdCommentForm" class="apd-comment-form"><textarea id="apdCommentText" rows="3" maxlength="2000" placeholder="이 지원자에 대한 의견을 남겨주세요 (예: 논리적으로 답했고 데이터 근거가 좋았어요)"></textarea><button type="button" id="apdCommentBtn" class="add-btn">댓글 쓰기</button></div>
+        </section>
+      </div>
+    </div>
+  </div>
   <template id="scheduleCardTpl">
     <div class="tpl-card">
       <div class="tpl-card-head">

@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-39';
+const APP_VERSION = '2026.10.21-43';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -1845,6 +1845,7 @@ document.getElementById('linkPasteBtn').addEventListener('click', () => linkSubm
 linkListEl.addEventListener('click', e => { const b = e.target.closest('.link-pick'); if (b) linkSelectPosting(b.dataset.id, '이 공고를 "평가할 공고"로 골라 뒀어요. 아래에서 이력서 PDF를 올리세요.'); });
 
 function renderEvalOptions() {
+  if (typeof renderLinkBox === 'function') renderLinkBox();   // 팀 선택칸과 링크 공고 목록은 보이는 공고가 0개여도 채워져야 해요(공고가 없을 때 조기 종료되기 전에 먼저 그려요)
   const keep = evalPositionSelect.value;
   const confirmed = scorablePostings();
   if (!confirmed.length) {
@@ -1860,7 +1861,6 @@ function renderEvalOptions() {
   if (confirmed.some(p => p.id === keep)) evalPositionSelect.value = keep;
   renderEvalDraftNote();
   if (typeof batchDecorateSelect === 'function') batchDecorateSelect();   // "· 저장된 결과 N명" 표시
-  if (typeof renderLinkBox === 'function') renderLinkBox();   // 링크로 올린 공고 목록과 팀 선택지도 같이 갱신해요
 }
 // 확정하지 않은 공고는 평가 목록에 안 나와요. 어느 공고가 왜 안 보이는지와 확정하러 가는 길을 알려줘요.
 function renderEvalDraftNote() {
@@ -2695,6 +2695,13 @@ function mountInterviewPanel(host, opts) {
   }
   const extraTa = $('.iq-extra-text'), extraCount = $('.iq-extra-count');
   extraTa.addEventListener('input', () => { extraCount.textContent = `${extraTa.value.length} / 8000자`; });
+  $('.iq-pdf').addEventListener('change', () => {
+    const fl = [...$('.iq-pdf').files]; const list = $('.iq-pdf-list');
+    if (fl.length > 2) { $('.iq-pdf').value = ''; list.textContent = '이력서 PDF는 최대 2개까지 올릴 수 있어요.'; return; }
+    const big = fl.find(f => f.size > 4 * 1024 * 1024); if (big) { $('.iq-pdf').value = ''; list.textContent = `"${big.name}"은 4MB를 넘어요. 파일을 줄여서 올려주세요.`; return; }
+    const bad = fl.find(f => !/\.pdf$/i.test(f.name) && f.type !== 'application/pdf'); if (bad) { $('.iq-pdf').value = ''; list.textContent = `"${bad.name}"은 PDF 파일이 아니에요.`; return; }
+    list.textContent = fl.length ? `올린 이력서: ${fl.map(f => f.name).join(', ')} (질문 추천받기를 누르면 이 이력서를 반영해요)` : '';
+  });
   $('.iq-run').addEventListener('click', async () => {
     if (!applicant) return;
     const mode = $('.iq-mode-prompt').checked ? 'prompt' : 'ai';
@@ -2702,7 +2709,10 @@ function mountInterviewPanel(host, opts) {
     answers = new Map(); reqq = []; facts = []; scens = []; planInfo = null; srcInfo = null; markDirty(false);
     const run = $('.iq-run'); run.disabled = true; setStatus(mode === 'ai' ? 'AI가 맞춤 질문을 만드는 중... (노션 문항은 바로 보여드려요)' : '요청문을 만드는 중...'); resultEl.hidden = true; promptBox.hidden = true; custom = [];
     try {
-      const res = await fetch('/api/interview/questions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, mode, stage: $('.iq-stage').value, minutes: Number($('.iq-minutes').value), withResume: $('.iq-with-resume').checked, extra: extraTa.value }) });
+      const pdfFiles = mode === 'ai' ? [...($('.iq-pdf').files || [])] : [];
+      const res = pdfFiles.length
+        ? await fetch(`/api/interview/questions-pdf?applicantId=${encodeURIComponent(applicant.id)}&stage=${encodeURIComponent($('.iq-stage').value)}&minutes=${Number($('.iq-minutes').value)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await batchBundleBody(pdfFiles) })   // 앱에서 올린 이력서 PDF: 질문을 만드는 데만 쓰고 저장하지 않아요
+        : await fetch('/api/interview/questions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicantId: applicant.id, mode, stage: $('.iq-stage').value, minutes: Number($('.iq-minutes').value), withResume: $('.iq-with-resume').checked, extra: extraTa.value }) });
       const j = await readJsonOrNull(res);
       if (!j) throw new Error('서버가 응답하지 못했어요. 잠시 후 다시 시도해주세요.');
       if (!res.ok || !j.success) throw new Error(j.error || '질문을 만들지 못했어요.');
@@ -2714,6 +2724,7 @@ function mountInterviewPanel(host, opts) {
       if (!j.applicant.hasSummary) notes.push('이 지원자는 앱에서 남긴 이력서 평가 요약이 없어서 직무 기준으로만 맞춤 질문을 만들어요');
       if (j.matchedPosition) notes.push(`확정 공고("${j.matchedPosition}")의 요건을 참고했어요`);
       if (j.dropped) notes.push(`나이·가족 같은 주제의 질문 ${j.dropped}개는 뺐어요`);
+      if (j.sources && j.sources.resume && j.sources.resume.uploaded) notes.push(`올린 이력서(${j.sources.resume.files.join(', ')})를 반영했어요(저장하지 않아요)`);
       (j.notes || []).forEach(x => notes.push(x.replace(/[.。]$/, '')));
       if (table && table.found === false && table.note) notes.push(table.note);
       else if (table && table.found) notes.push('노션 채용 문항 표에 답변을 바로 쓸 수 있어요');
@@ -2748,18 +2759,33 @@ function mountInterviewPanel(host, opts) {
   }
   const rowKey = q => (q.no ? 'no:' + q.no : 'q:' + String(q.question || '').replace(/\s+/g, ' ').trim());
   const stateOf = q => { const k = rowKey(q); if (!answers.has(k)) { const ex = existing.get(k) || (q.no ? null : existing.get('q:' + String(q.question || '').replace(/\s+/g, ' ').trim())); answers.set(k, { answer: ex ? ex.answer : '', reason: ex ? (ex.reason || '') : '', score: ex ? ex.score : 0, base: ex ? (ex.raw ?? ex.answer) : '', fromNotion: !!ex && !!(ex.answer || ex.reason || ex.score) }); } return answers.get(k); };
-  function group(title, hint, items, checked, kind) {
-    if (!items.length) return '';
-    return `<div class="iq-group"><strong>${escapeHtml(title)}</strong>${hint ? `<span class="manage-hint" style="margin:0 0 0 6px">${escapeHtml(hint)}</span>` : ''}<ul class="iq-list">` + items.map((q, i) => { const st = stateOf(q); return `
+  // 면접 진행 순서로 한 줄 목록을 만들어요: 오프닝 → 노션 필수 질문과 이력서 맞춤 질문을 번갈아 → 공고 요건 → 직무 상황 → 사실 확인 → 추천 선택 → 그 밖의 선택.
+  // 항목마다 원래 구역(data-kind)과 번호(data-i)를 그대로 써서, 체크·답변·점수·노션 전송이 구역별 보기와 똑같이 동작해요.
+  function mixedHtml() {
+    const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
+    const rows = []; const add = (list, kind, tag, checked) => (list || []).forEach((q, i) => rows.push({ q, i, kind, tag, checked }));
+    add(data.opening, 'opening', '오프닝', false);
+    const req = (data.required || []).map((q, i) => ({ q, i, kind: 'required', tag: '노션 문항', checked: true })), cus = (custom || []).map((q, i) => ({ q, i, kind: 'custom', tag: '이력서 맞춤', checked: true }));
+    for (let k = 0; k < Math.max(req.length, cus.length); k++) { if (req[k]) rows.push(req[k]); if (cus[k]) rows.push(cus[k]); }   // 노션 필수 1 → 맞춤 1 → 노션 필수 2 → 맞춤 2 …(한쪽이 먼저 끝나면 남은 것을 이어서)
+    add(reqq, 'reqq', '공고 요건', true); add(scens, 'scen', '직무 상황', true); add(facts, 'fact', '사실 확인', true);
+    add(data.suggested, 'suggested', '노션 문항', true); add(more, 'more', '노션 문항', false);
+    if (!rows.length) return '';
+    return `<div class="iq-group iq-mixed"><strong>면접 질문 (섞어서 · 진행 순서대로)</strong><span class="manage-hint" style="margin:0 0 0 6px">노션 문항과 이력서 맞춤 질문을 한 줄로 섞었어요. 앞의 표시로 어디서 온 질문인지 구분해요</span><ul class="iq-list">${rows.map(r => itemHtml(r.q, r.i, r.kind, r.checked, r.tag)).join('')}</ul></div>`;
+  }
+  let iqView = 'mixed';   // 'mixed'(섞어서) | 'groups'(구역별)
+  function itemHtml(q, i, kind, checked, tag) { const st = stateOf(q); return `
       <li data-kind="${kind}" data-i="${i}"><label><input type="checkbox" class="iq-chk" data-kind="${kind}" data-i="${i}"${checked ? ' checked' : ''} />
-        <span class="iq-q">${q.isReq ? `<span class="req-kind kind-${q.kind === '우대' ? 'pref' : 'must'}">${escapeHtml(q.kind)} ${escapeHtml(q.reqId)}</span>` : (q.no ? `<span class="iq-no">${escapeHtml(q.no)}</span>` : '')}${q.type && ['경력 검증', '요건 확인', '사실 확인', '직무 상황', '인재상', '동기·조건'].includes(q.type) ? `<span class="iq-type">${escapeHtml(q.type)}</span>` : ''}${escapeHtml(q.question)}${st.fromNotion ? ' <span class="iq-badge">노션에 기록 있음</span>' : ''}</span></label>
-        ${q.isReq ? `<div class="iq-sub">요건: ${escapeHtml(q.requirement)}</div>` : (q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : '')}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : ''}${(q.followUps && q.followUps.length) || (q.goodSigns && q.goodSigns.length) || (q.watchSigns && q.watchSigns.length) ? `<details class="iq-more"><summary>꼬리질문 · 답변 평가 신호</summary>${q.followUps && q.followUps.length ? `<div class="iq-sub"><strong>꼬리질문</strong> ${q.followUps.map(escapeHtml).join(' / ')}</div>` : ''}${q.goodSigns && q.goodSigns.length ? `<div class="iq-sub iq-good"><strong>좋은 답의 신호</strong> ${q.goodSigns.map(escapeHtml).join(' / ')}</div>` : ''}${q.watchSigns && q.watchSigns.length ? `<div class="iq-sub iq-watch"><strong>주의 신호</strong> ${q.watchSigns.map(escapeHtml).join(' / ')}</div>` : ''}<div class="manage-hint" style="margin:2px 0 0">신호는 답을 들으며 관찰하는 참고용이에요. 합격·불합격 기준이 아니에요.</div></details>` : ''}
+        <span class="iq-q">${tag ? `<span class="iq-src-tag">${escapeHtml(tag)}</span>` : ''}${q.isReq ? `<span class="req-kind kind-${q.kind === '우대' ? 'pref' : 'must'}">${escapeHtml(q.kind)} ${escapeHtml(q.reqId)}</span>` : (q.no ? `<span class="iq-no">${escapeHtml(q.no)}</span>` : '')}${q.type && ['경력 검증', '요건 확인', '사실 확인', '직무 상황', '인재상', '동기·조건'].includes(q.type) ? `<span class="iq-type">${escapeHtml(q.type)}</span>` : ''}${escapeHtml(q.question)}${st.fromNotion ? ' <span class="iq-badge">노션에 기록 있음</span>' : ''}</span></label>
+        ${q.isReq ? `<div class="iq-sub">요건: ${escapeHtml(q.requirement)}</div>` : (q.criteria ? `<div class="iq-sub">확인: ${escapeHtml(q.criteria)}</div>` : '')}${q.basis ? `<div class="iq-sub">근거: ${escapeHtml(q.basis)}</div>` : (srcInfo && srcInfo.sources && srcInfo.sources.resume && srcInfo.sources.resume.used && !q.isReq && q.type !== undefined ? '<div class="iq-sub iq-general">일반 질문 — 이력서에서 근거를 찾지 못했어요</div>' : '')}${(q.followUps && q.followUps.length) || (q.goodSigns && q.goodSigns.length) || (q.watchSigns && q.watchSigns.length) ? `<details class="iq-more"><summary>꼬리질문 · 답변 평가 신호</summary>${q.followUps && q.followUps.length ? `<div class="iq-sub"><strong>꼬리질문</strong> ${q.followUps.map(escapeHtml).join(' / ')}</div>` : ''}${q.goodSigns && q.goodSigns.length ? `<div class="iq-sub iq-good"><strong>좋은 답의 신호</strong> ${q.goodSigns.map(escapeHtml).join(' / ')}</div>` : ''}${q.watchSigns && q.watchSigns.length ? `<div class="iq-sub iq-watch"><strong>주의 신호</strong> ${q.watchSigns.map(escapeHtml).join(' / ')}</div>` : ''}<div class="manage-hint" style="margin:2px 0 0">신호는 답을 들으며 관찰하는 참고용이에요. 합격·불합격 기준이 아니에요.</div></details>` : ''}
         <div class="iq-ans"${checked ? '' : ' hidden'}>
           <textarea class="iq-ans-text" rows="2" maxlength="6000" placeholder="면접 답변을 적어요 (노션 채용 문항 표의 '답변'에 들어가요)" aria-label="답변">${escapeHtml(st.answer)}</textarea>
           <select class="iq-ans-score" aria-label="점수(⭐)"><option value="0">점수 선택</option>${[1,2,3,4,5].map(n => `<option value="${n}"${st.score === n ? ' selected' : ''} title="${escapeHtml(STAR_MEANING[n])}">${'⭐'.repeat(n)} ${STAR_SHORT[n]}</option>`).join('')}</select>
           <input class="iq-ans-reason" maxlength="1000" placeholder="평가 사유 (선택) — 답에서 관찰한 행동·근거를 적어요. 나이·가족 같은 내용은 쓰지 마세요" aria-label="평가 사유" value="${escapeHtml(st.reason || '')}" />
           <span class="manage-hint iq-reason-hint" style="margin:0"></span>
-        </div></li>`; }).join('') + '</ul></div>';
+        </div></li>`; }
+  function group(title, hint, items, checked, kind) {
+    if (!items.length) return '';
+    return `<div class="iq-group"><strong>${escapeHtml(title)}</strong>${hint ? `<span class="manage-hint" style="margin:0 0 0 6px">${escapeHtml(hint)}</span>` : ''}<ul class="iq-list">` + items.map((q, i) => itemHtml(q, i, kind, checked)).join('') + '</ul></div>';
   }
   // 이번 질문에 쓴 자료와 면접 진행안(시간 배분)을 결과 맨 위에 보여줘요
   function planHtml() {
@@ -2785,7 +2811,8 @@ function mountInterviewPanel(host, opts) {
     if (!data) return;
     resultEl.hidden = false;
     const more = (data.optionalAll || []).filter(x => !(data.suggested || []).some(y => y.no === x.no));
-    resultEl.innerHTML = planHtml() + starGuideHtml() +
+    const viewBar = `<div class="iq-viewbar" role="tablist" aria-label="질문 보기 방식"><button type="button" class="sub-btn iq-view-btn${iqView === 'mixed' ? ' active' : ''}" data-view="mixed" role="tab" aria-selected="${iqView === 'mixed'}">섞어서 보기</button><button type="button" class="sub-btn iq-view-btn${iqView === 'groups' ? ' active' : ''}" data-view="groups" role="tab" aria-selected="${iqView === 'groups'}">구역별로 보기</button></div>`;
+    resultEl.innerHTML = planHtml() + starGuideHtml() + viewBar + (iqView === 'mixed' ? mixedHtml() : '') + (iqView === 'mixed' ? '' :
       group('공고 요건 확인 질문', '공고의 필수·우대 요건마다 하나씩 (면접에서 어떻게 했는지 확인)', reqq, true, 'reqq') +
         group('이력서 맞춤 질문', 'AI가 지원자의 이력서 평가 요약을 근거로 만든 질문', custom, true, 'custom') +
       group('직무 상황 질문', '공고의 업무를 바탕으로 한 상황 질문 (정답보다 판단 근거와 우선순위를 확인)', scens, true, 'scen') +
@@ -2793,10 +2820,17 @@ function mountInterviewPanel(host, opts) {
       group('필수 질문', `노션 문항 ${data.required.length}개`, data.required, true, 'required') +
       group('추천 선택 질문', '직무에 어울리는 노션 선택 문항', data.suggested || [], true, 'suggested') +
       group('오프닝(인사)', '면접 시작 때', data.opening || [], false, 'opening') +
-      group('그 밖의 선택 질문', '필요하면 체크하세요', more, false, 'more') +
+      group('그 밖의 선택 질문', '필요하면 체크하세요', more, false, 'more')) +
       `<div class="posting-actions iq-actions"><button type="button" class="iq-copy-sel add-btn">선택한 질문 복사</button><button type="button" class="iq-save add-btn" data-edit="resume">노션 카드에 질문 기록</button><button type="button" class="iq-send-ans add-btn">답변을 노션에 전송</button><span class="manage-hint iq-count"></span></div>
        <p class="iq-score-sum" aria-live="polite"></p>
        <p class="manage-hint iq-ans-note">체크한 질문 아래에 답변과 점수를 적고 "답변을 노션에 전송"을 누르세요. 노션 「채용 문항」 표의 해당 질문 행에 쓰이고, 표에 없는 질문(맞춤 질문)은 새 행으로 추가돼요. 표가 없는 카드는 카드 본문에 기록해요. 노션에 이미 다른 답변이 있으면 덮어쓰기 전에 물어봐요.</p>`;
+    resultEl.querySelectorAll('.iq-view-btn').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.view === iqView) return;
+      const checkedNow = new Map([...resultEl.querySelectorAll('.iq-chk')].map(c => [c.dataset.kind + ':' + c.dataset.i, c.checked]));   // 보기를 바꿔도 체크 상태는 지켜요(답변·점수는 질문 객체에 있어서 그대로예요)
+      iqView = b.dataset.view; renderResult();
+      resultEl.querySelectorAll('.iq-chk').forEach(c => { const k = c.dataset.kind + ':' + c.dataset.i; if (checkedNow.has(k)) { c.checked = checkedNow.get(k); const li = c.closest('li'); li.querySelector('.iq-ans').hidden = !c.checked; } });
+      updateCount();
+    }));
     resultEl.querySelectorAll('.iq-chk').forEach(c => c.addEventListener('change', () => { const li = c.closest('li'); li.querySelector('.iq-ans').hidden = !c.checked; updateCount(); }));
     resultEl.querySelectorAll('.iq-list li').forEach(li => {
       const grp = li.dataset.kind; const idx = Number(li.dataset.i); const q = listOf(grp)[idx]; if (!q) return;
@@ -4138,6 +4172,45 @@ function applyPermissions() {
   return firstVisible;
 }
 
+
+// ---------- 면접 제안 대기 알림 (서류 합격 확정이 되면 제나에게 와요) ----------
+const offerAlertBtn = document.getElementById('offerAlertBtn'), offerAlertCount = document.getElementById('offerAlertCount'), oaModal = document.getElementById('offerAlertModal'), oaList = document.getElementById('oaList');
+let offerAlerts = [];
+const oaMsg = (m, cls) => { const el = document.getElementById('oaMsg'); el.textContent = m || ''; el.className = 'status' + (cls ? ' ' + cls : ''); };
+function oaRender() {
+  offerAlertBtn.hidden = !offerAlerts.length || offerAlertEnabled === false;
+  offerAlertCount.textContent = offerAlerts.length ? String(offerAlerts.length) : '';
+  oaList.innerHTML = offerAlerts.length ? offerAlerts.map(x => {
+    const meta = [x.team, x.job, x.score === null || x.score === undefined ? '' : `점수 ${x.score}`].filter(Boolean).join(' · ');
+    return `<div class="oa-item" data-id="${escapeHtml(x.id)}"><div><strong>${escapeHtml(x.name || '(이름 없음)')}</strong> <span class="ap-sub">${escapeHtml(meta)}</span><div class="ap-sub">${escapeHtml(x.byName || '담당자')}님이 ${escapeHtml(apdWhen(x.at))}에 서류 합격 확정 · ${x.phone ? escapeHtml(x.phone) : '연락처 없음'}</div></div><div class="oa-actions">${x.phone ? `<button type="button" class="add-btn oa-send" data-id="${escapeHtml(x.id)}">면접 제안 문자 보내기</button>` : ''}<button type="button" class="link-btn oa-done" data-id="${escapeHtml(x.id)}">처리됨</button></div></div>`;
+  }).join('') : '<p class="ap-sub">면접 제안을 기다리는 사람이 없어요.</p>';
+}
+let offerAlertEnabled = null;
+async function loadOfferAlerts() {
+  try {
+    const res = await fetch('/api/offer-alerts'); if (!res.ok) return; const j = await res.json();
+    offerAlertEnabled = j.enabled !== false; offerAlerts = offerAlertEnabled ? (j.alerts || []) : []; oaRender();
+  } catch { /* 알림을 못 불러와도 화면은 그대로 써요(다음 확인 때 다시 시도해요) */ }
+}
+function oaOpen() { oaMsg(''); oaRender(); oaModal.hidden = false; document.body.classList.add('apd-open'); document.getElementById('oaClose').focus(); }
+function oaClose() { oaModal.hidden = true; document.body.classList.remove('apd-open'); }
+offerAlertBtn.addEventListener('click', oaOpen);
+oaModal.addEventListener('click', async e => {
+  if (e.target.closest('#oaClose') || e.target.dataset.oaclose) { oaClose(); return; }
+  const s = e.target.closest('.oa-send'); if (s) { const x = offerAlerts.find(v => v.id === s.dataset.id); if (x) { oaClose(); fillSendFormFromNotion({ id: x.applicantId, name: x.name, phone: x.phone }); } return; }
+  const d = e.target.closest('.oa-done'); if (d) {
+    d.disabled = true;
+    try {
+      const res = await fetch('/api/offer-alerts/' + encodeURIComponent(d.dataset.id), { method: 'DELETE' }); const j = await res.json().catch(() => ({}));
+      if (res.ok) { offerAlerts = j.alerts || []; oaRender(); oaMsg('처리됨으로 표시했어요.', 'ok'); }
+      else if (res.status === 404) { await loadOfferAlerts(); oaMsg('이미 처리된 알림이에요.', 'ok'); }
+      else { d.disabled = false; oaMsg(j.error || '처리하지 못했어요.', 'err'); }
+    } catch { d.disabled = false; oaMsg('서버에 연결하지 못했어요.', 'err'); }
+  }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !oaModal.hidden) { e.preventDefault(); oaClose(); } });
+setInterval(() => { if (!document.hidden && typeof ME !== 'undefined' && ME.mode !== 'none') loadOfferAlerts(); }, 60000);   // 1분마다 새 알림을 확인해요
+
 function initDock() {
   if (ME.mode === 'none') { document.getElementById('authBanner').hidden = false; return; }
   document.getElementById('authBanner').hidden = true;
@@ -4146,6 +4219,7 @@ function initDock() {
   dockName.textContent = ME.name || '로그인됨';
   dockRole.textContent = ME.role === 'owner' ? '소유주' : (ME.role === 'teamlead' ? `팀장 · ${(ME.teams || []).join('·')}` : '');
   openAdminBtn.hidden = !ME.canManage;
+  loadOfferAlerts();   // 면접 제안을 기다리는 사람이 있으면 도크에 알려요
 }
 dockLogoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
@@ -4350,6 +4424,105 @@ function apSchedBadge(x, round) {
   } else if (r.state === 'schedule_only' && apCanEdit()) fixes.push(`<button type="button" class="link-btn ap-sch-fix" data-dir="toNotion" data-round="${round}">일정 → 노션</button>`);
   return `<span class="ap-sch ap-sch-${cls}" data-round="${round}">${label}${escapeHtml(detail)}${warnPhone}</span>${fixes.length ? `<span class="ap-sch-actions">${fixes.join(' ')}</span>` : ''}`;
 }
+
+// ---------- 지원자 페이지: 이름을 누르면 왼쪽에 정보, 오른쪽에 면접 기록(앱 안에 저장) ----------
+const apd = { id: '', x: null, note: null, dirty: new Set(), loading: false };
+const apdEl = document.getElementById('apDetail');
+const APD_SECTIONS = [['r1', '1차 면접 내용', '질문과 답변, 지원자의 태도, 확인한 점을 적어주세요'], ['r2', '2차 면접 내용', '2차 면접에서 확인한 내용을 적어주세요'], ['opinion', '종합 의견', '채용 의견과 그 이유를 적어주세요']];
+const apdWhen = iso => { const d = new Date(iso); if (isNaN(d)) return ''; return `${d.getMonth() + 1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const apdMsg = (m, cls) => { const el = document.getElementById('apdMsg'); el.textContent = m || ''; el.className = 'status' + (cls ? ' ' + cls : ''); };
+function apdInfoHtml(x) {
+  const rec = AP_REC[x.recommendation];
+  const rows = [['팀 · 직무', [x.team, x.job].filter(Boolean).join(' · ')], ['면접상태', x.status], ['1차 면접', apFmtWhen(x.interview1)], ['2차 면접', apFmtWhen(x.interview2)], ['점수 · 추천', (x.score === null || x.score === undefined ? '' : String(x.score)) + (rec ? ` ${rec[0]}` : '')], ['연락처', x.phone], ['지원채널', (x.channels || []).join(', ')], ['지원일', x.appliedAt], ['면접 문자', x.smsStatus], ['입사일', x.hireDate], ['메모', x.memo]];
+  return '<dl class="apd-dl">' + rows.filter(r => r[1]).map(r => `<dt>${escapeHtml(r[0])}</dt><dd>${escapeHtml(r[1])}</dd>`).join('') + '</dl>';
+}
+function apdRenderNotes() {
+  const n = apd.note || {}; const canEdit = apCanEdit();
+  document.getElementById('apdNotes').innerHTML = APD_SECTIONS.map(([k, label, ph]) => {
+    const cur = n[k]; const who = cur ? `${escapeHtml(cur.name || '')}님이 ${escapeHtml(apdWhen(cur.at))}에 씀` : '아직 쓰지 않았어요';
+    return `<div class="apd-section" data-sec="${k}"><label for="apd-${k}"><strong>${label}</strong></label><textarea id="apd-${k}" data-sec="${k}" rows="${k === 'opinion' ? 4 : 7}" maxlength="8000" placeholder="${escapeHtml(ph)}"${canEdit ? '' : ' readonly'}>${escapeHtml(cur ? cur.text : '')}</textarea><div class="apd-row"><span class="ap-sub apd-who">${who}</span>${canEdit ? `<button type="button" class="add-btn apd-save" data-sec="${k}">저장</button>` : ''}</div></div>`;
+  }).join('');
+  const cs = n.comments || [];
+  document.getElementById('apdComments').innerHTML = cs.length ? cs.map(c => `<div class="apd-comment" data-cid="${escapeHtml(c.id)}"><div class="ap-sub">${escapeHtml(c.name || '')} · ${escapeHtml(apdWhen(c.at))}${canEdit && (!ME.email || ME.email === c.by || ME.role === 'owner') ? ` <button type="button" class="link-btn apd-cdel" data-cid="${escapeHtml(c.id)}">삭제</button>` : ''}</div><div class="apd-ctext">${escapeHtml(c.text)}</div></div>`).join('') : '<p class="ap-sub">아직 댓글이 없어요.</p>';
+  document.getElementById('apdCommentForm').hidden = !canEdit;
+  const hasAny = !!(n.r1 || n.r2 || n.opinion || (n.comments || []).length);
+  const delBox = document.getElementById('apdDeleteBox'); const canDeleteAll = ME.role === 'owner' || ME.role === 'full';   // 서버도 소유주만 허용해요(비밀번호 로그인은 모두 전체 권한)
+  delBox.hidden = !(canDeleteAll && hasAny);
+  apd.dirty.clear();
+}
+async function apdFetchNote(id) {
+  const res = await fetch('/api/interview-notes/' + encodeURIComponent(id)); const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || '면접 기록을 불러오지 못했어요.'); return j.note;
+}
+async function openApplicantDetail(id) {
+  const x = apList.find(v => v.id === id) || (apKanbanList || []).find(v => v.id === id) || (apMonthData && apMonthData.applicants.find(v => v.id === id)); if (!x) return;
+  Object.assign(apd, { id, x, note: null, loading: true }); apd.dirty.clear();
+  document.getElementById('apdTitle').textContent = `${x.name || '(이름 없음)'}${x.team ? ' · ' + x.team : ''}`;
+  document.getElementById('apdStatus').textContent = x.status || '';
+  document.getElementById('apdInfo').innerHTML = apdInfoHtml(x); document.getElementById('apdCard').textContent = '불러오는 중...'; document.getElementById('apdNotes').innerHTML = ''; document.getElementById('apdComments').innerHTML = ''; apdMsg('');
+  const lead = ME.role === 'teamlead'; const note = document.getElementById('apdLeadNote'); note.hidden = !(lead || !apCanEdit()); note.textContent = lead ? `${(ME.teams || []).join('·')} 면접 기록만 보여요(보기 전용). 쓰기는 소유주에게 요청해주세요.` : '보기 전용이에요(수정 권한이 없어요).';
+  apdEl.hidden = false; document.body.classList.add('apd-open'); document.getElementById('apdClose').focus();
+  try { apd.note = await apdFetchNote(id); apdRenderNotes(); } catch (err) { apdMsg(err.message, 'err'); }
+  apd.loading = false;
+  try {   // 이력서 평가 요약·학력·경력은 노션 카드에서 읽어와요(못 읽어도 위의 정보와 면접 기록은 그대로 써요)
+    const res = await fetch('/api/interview/card?applicantId=' + encodeURIComponent(id)); const j = await res.json().catch(() => ({}));
+    if (apd.id !== id) return;
+    const card = document.getElementById('apdCard');
+    if (!res.ok) { card.textContent = j.error || '이력서 평가를 불러오지 못했어요.'; return; }
+    const ap = j.applicant || {};
+    card.innerHTML = [ap.education ? `<div><strong>학력</strong> ${escapeHtml(ap.education)}</div>` : '', ap.career ? `<div><strong>주요 경력</strong> ${escapeHtml(ap.career)}</div>` : '', ap.summary ? `<div class="apd-summary"><strong>평가 요약</strong><div>${escapeHtml(ap.summary)}</div></div>` : ''].join('') || '이력서 평가 내용이 없어요.';
+  } catch { if (apd.id === id) document.getElementById('apdCard').textContent = '이력서 평가를 불러오지 못했어요.'; }
+}
+function apdClose(force) {
+  if (!force && apd.dirty.size && !confirm('저장하지 않은 내용이 있어요. 그래도 닫을까요?')) return false;
+  apdEl.hidden = true; document.body.classList.remove('apd-open'); apd.id = ''; apd.dirty.clear(); return true;
+}
+async function apdSave(sec) {
+  const ta = document.getElementById('apd-' + sec); if (!ta || !apd.id) return; const btn = apdEl.querySelector(`.apd-save[data-sec="${sec}"]`); btn.disabled = true; apdMsg('저장하는 중...');
+  try {
+    const cur = apd.note && apd.note[sec];
+    const res = await fetch('/api/interview-notes/' + encodeURIComponent(apd.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section: sec, text: ta.value, expectedAt: (cur && cur.at) || '' }) });
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 409) { apdMsg(j.error || '다른 사람이 먼저 고쳤어요. 아무것도 덮어쓰지 않았어요.', 'err'); return; }
+    if (!res.ok) { apdMsg(j.error || '저장하지 못했어요.', 'err'); return; }
+    const keep = {}; apdEl.querySelectorAll('.apd-section textarea').forEach(t => { if (t.dataset.sec !== sec && apd.dirty.has(t.dataset.sec)) keep[t.dataset.sec] = t.value; });
+    apd.note = j.note; apdRenderNotes();
+    Object.entries(keep).forEach(([k, v]) => { const t = document.getElementById('apd-' + k); if (t) { t.value = v; apd.dirty.add(k); } });   // 저장하지 않은 다른 칸의 글은 지켜요
+    apdMsg(ta.value.trim() ? '저장했어요.' : '내용을 비워서 이 칸을 지웠어요.', 'ok');
+  } catch { apdMsg('서버에 연결하지 못했어요.', 'err'); } finally { btn.disabled = false; }
+}
+async function apdAddComment() {
+  const ta = document.getElementById('apdCommentText'); const text = ta.value.trim(); if (!text || !apd.id) { apdMsg('댓글 내용을 입력해주세요.', 'err'); return; }
+  const btn = document.getElementById('apdCommentBtn'); btn.disabled = true;
+  try {
+    const res = await fetch('/api/interview-notes/' + encodeURIComponent(apd.id) + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const j = await res.json().catch(() => ({})); if (!res.ok) { apdMsg(j.error || '댓글을 쓰지 못했어요.', 'err'); return; }
+    const keep = {}; apdEl.querySelectorAll('.apd-section textarea').forEach(t => { if (apd.dirty.has(t.dataset.sec)) keep[t.dataset.sec] = t.value; });
+    apd.note = j.note; apdRenderNotes(); ta.value = '';
+    Object.entries(keep).forEach(([k, v]) => { const t = document.getElementById('apd-' + k); if (t) { t.value = v; apd.dirty.add(k); } });
+    apdMsg('댓글을 남겼어요.', 'ok');
+  } catch { apdMsg('서버에 연결하지 못했어요.', 'err'); } finally { btn.disabled = false; }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-open-detail]'); if (b) { e.stopPropagation(); openApplicantDetail(b.dataset.openDetail); } });
+apdEl.addEventListener('click', async e => {
+  if (e.target.closest('#apdClose') || e.target.dataset.close) { apdClose(); return; }
+  const s = e.target.closest('.apd-save'); if (s) { apdSave(s.dataset.sec); return; }
+  if (e.target.closest('#apdCommentBtn')) { apdAddComment(); return; }
+  if (e.target.closest('#apdDeleteAll')) {
+    if (!confirm('이 지원자의 면접 기록(1차·2차 면접 내용, 종합 의견, 의견 댓글)을 모두 지울까요?\n\n지우면 되돌릴 수 없어요.')) return;
+    const res = await fetch('/api/interview-notes/' + encodeURIComponent(apd.id), { method: 'DELETE' }); const j = await res.json().catch(() => ({}));
+    if (res.ok) { apd.note = { id: apd.id, team: '', r1: null, r2: null, opinion: null, comments: [] }; apdRenderNotes(); apdMsg('이 지원자의 면접 기록을 모두 지웠어요.', 'ok'); } else apdMsg(j.error || '지우지 못했어요.', 'err');
+    return;
+  }
+  const d = e.target.closest('.apd-cdel'); if (d) {
+    if (!confirm('이 댓글을 지울까요?')) return;
+    const res = await fetch('/api/interview-notes/' + encodeURIComponent(apd.id) + '/comments/' + encodeURIComponent(d.dataset.cid), { method: 'DELETE' }); const j = await res.json().catch(() => ({}));
+    if (res.ok) { apd.note = j.note; apdRenderNotes(); apdMsg('댓글을 지웠어요.', 'ok'); } else apdMsg(j.error || '지우지 못했어요.', 'err');
+  }
+});
+apdEl.addEventListener('input', e => { const t = e.target.closest('.apd-section textarea'); if (t) apd.dirty.add(t.dataset.sec); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !apdEl.hidden) { e.preventDefault(); apdClose(); } });
+
 function apRowHtml(x) {
   const rec = AP_REC[x.recommendation];
   const canEdit = apCanEdit();
@@ -4358,7 +4531,7 @@ function apRowHtml(x) {
     ? `<select class="ap-status" data-id="${escapeHtml(x.id)}" aria-label="면접상태">${(statuses.includes(x.status) || !x.status ? '' : `<option value="${escapeHtml(x.status)}">${escapeHtml(x.status)}</option>`)}<option value=""${x.status ? '' : ' selected'}>(없음)</option>${statuses.map(s => `<option value="${escapeHtml(s)}"${s === x.status ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>`
     : escapeHtml(x.status || '-');
   return `<tr class="ap-row" data-id="${escapeHtml(x.id)}">
-    <td data-label="이름"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong>${x.phone ? `<span class="ap-sub">${escapeHtml(x.phone)}</span>` : ''}${apAmbiguousNote(x)}</td>
+    <td data-label="이름"><button type="button" class="ap-name-link" data-open-detail="${escapeHtml(x.id)}" title="누르면 지원자 정보와 면접 기록이 열려요"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong></button>${x.phone ? `<span class="ap-sub">${escapeHtml(x.phone)}</span>` : ''}${apAmbiguousNote(x)}</td>
     <td data-label="팀 · 직무">${escapeHtml(x.team || '-')}${x.job ? `<span class="ap-sub">${escapeHtml(x.job)}</span>` : ''}</td>
     <td data-label="면접상태">${statusCell}${x.smsStatus ? `<span class="ap-sub">문자: ${escapeHtml(x.smsStatus)}</span>` : ''}</td>
     <td data-label="1차 면접">${escapeHtml(apFmtWhen(x.interview1))}${apSchedBadge(x, '1차')}</td>
@@ -4623,7 +4796,7 @@ function apRenderMonth() {
   const summary = items.length ? `${yy}년 ${Number(mm)}월 면접 <strong>${items.length}건</strong> · ${order.map(k => `${escapeHtml(k)} ${groups.get(k).length}`).join(' · ')}` : `${yy}년 ${Number(mm)}월에는 ${apTeam.value ? escapeHtml(apTeam.value) + '의 ' : ''}면접이 없어요.`;
   const wd = ['일', '월', '화', '수', '목', '금', '토'];
   const fmt = (w, dateOnly) => { const y = +w.slice(0, 4), m = +w.slice(5, 7), d = +w.slice(8, 10); const p = n => String(n).padStart(2, '0'); const dow = wd[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]; return `${p(m)}/${p(d)}(${dow})${dateOnly ? '' : ' ' + w.slice(11, 16)}`; };   // 시간대와 상관없이 같은 값으로 그려요(요일도 날짜 문자열에서 계산)
-  const row = it => { const x = it.x; const canEdit = apCanEdit(); return `<tr class="ap-mrow" data-id="${escapeHtml(x.id)}"><td data-label="일시"><strong>${escapeHtml(fmt(it.when, it.dateOnly))}</strong> <span class="ap-round">${it.round}</span>${apSchedBadge(x, it.round)}</td><td data-label="이름"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong>${x.job ? `<span class="ap-sub">${escapeHtml(x.job)}</span>` : ''}</td><td data-label="면접상태">${escapeHtml(x.status || '-')}${x.smsStatus ? `<span class="ap-sub">문자: ${escapeHtml(x.smsStatus)}</span>` : ''}</td><td data-label="">${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('send') ? '<button type="button" class="add-btn ap-sms-btn">📨 면접 문자</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('schedule') ? '<button type="button" class="link-btn ap-sch-btn">📅 일정</button> ' : ''}<button type="button" class="add-btn ap-iq-btn">면접 질문·답변</button> <a class="link-btn" href="${escapeHtml(x.url || '#')}" target="_blank" rel="noopener">노션</a></td></tr>`; };
+  const row = it => { const x = it.x; const canEdit = apCanEdit(); return `<tr class="ap-mrow" data-id="${escapeHtml(x.id)}"><td data-label="일시"><strong>${escapeHtml(fmt(it.when, it.dateOnly))}</strong> <span class="ap-round">${it.round}</span>${apSchedBadge(x, it.round)}</td><td data-label="이름"><button type="button" class="ap-name-link" data-open-detail="${escapeHtml(x.id)}" title="누르면 지원자 정보와 면접 기록이 열려요"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong></button>${x.job ? `<span class="ap-sub">${escapeHtml(x.job)}</span>` : ''}</td><td data-label="면접상태">${escapeHtml(x.status || '-')}${x.smsStatus ? `<span class="ap-sub">문자: ${escapeHtml(x.smsStatus)}</span>` : ''}</td><td data-label="">${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('send') ? '<button type="button" class="add-btn ap-sms-btn">📨 면접 문자</button> ' : ''}${AP_ACTIVE.includes(x.status) && canEdit && canEdit_('schedule') ? '<button type="button" class="link-btn ap-sch-btn">📅 일정</button> ' : ''}<button type="button" class="add-btn ap-iq-btn">면접 질문·답변</button> <a class="link-btn" href="${escapeHtml(x.url || '#')}" target="_blank" rel="noopener">노션</a></td></tr>`; };
   apMonthBody.innerHTML = `<p class="ap-monthsummary">${summary}</p>` + order.map(k => `<section class="ap-teamgroup"><h3>${escapeHtml(k)} <span class="ap-teamcount">${groups.get(k).length}건</span></h3><table class="history-table stack-table ap-mtable"><thead><tr><th>일시</th><th>이름 · 직무</th><th>면접상태</th><th></th></tr></thead><tbody>${groups.get(k).map(row).join('')}</tbody></table></section>`).join('');
 }
 document.getElementById('apViewList').addEventListener('click', () => { if (apView !== 'list') apSetView('list'); });
@@ -4680,7 +4853,7 @@ function apKanbanCardHtml(x, cols, canMove) {
   const rec = x.recommendation && AP_REC[x.recommendation] ? `<span class="ap-rec ${AP_REC[x.recommendation][1]}">${AP_REC[x.recommendation][0]}</span>` : '';
   const moveSel = canMove ? `<select class="ap-kb-move" data-id="${escapeHtml(x.id)}" aria-label="${escapeHtml(x.name || '지원자')} 상태 이동"><option value="">이동…</option>${cols.filter(c => c !== '(상태 없음)' && c !== (x.status || '(상태 없음)')).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select>` : '';
   const sms = canMove && AP_ACTIVE.includes(x.status) && canEdit_('send') ? `<button type="button" class="link-btn ap-kb-sms" data-id="${escapeHtml(x.id)}">📨 면접 문자</button>` : '';
-  return `<div class="ap-kb-card" role="listitem" data-id="${escapeHtml(x.id)}" ${canMove ? 'draggable="true"' : ''}><div class="ap-kb-name"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong>${rec}</div><div class="ap-sub">${escapeHtml([x.team, x.job].filter(Boolean).join(' · '))}</div>${sch ? `<div class="ap-kb-sch">${sch}</div>` : ''}${x.score ? `<div class="ap-sub">점수 ${escapeHtml(String(x.score))}</div>` : ''}<div class="ap-kb-actions">${moveSel}${sms}${x.url ? `<a class="link-btn" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">노션</a>` : ''}</div></div>`;
+  return `<div class="ap-kb-card" role="listitem" data-id="${escapeHtml(x.id)}" ${canMove ? 'draggable="true"' : ''}><div class="ap-kb-name"><button type="button" class="ap-name-link" data-open-detail="${escapeHtml(x.id)}" title="누르면 지원자 정보와 면접 기록이 열려요" draggable="false"><strong>${escapeHtml(x.name || '(이름 없음)')}</strong></button>${rec}</div><div class="ap-sub">${escapeHtml([x.team, x.job].filter(Boolean).join(' · '))}</div>${sch ? `<div class="ap-kb-sch">${sch}</div>` : ''}${x.score ? `<div class="ap-sub">점수 ${escapeHtml(String(x.score))}</div>` : ''}<div class="ap-kb-actions">${moveSel}${sms}${x.url ? `<a class="link-btn" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">노션</a>` : ''}</div></div>`;
 }
 function apRenderKanban() {
   const cols = apKanbanColumns(); const canMove = apCanEdit(); const by = new Map(cols.map(c => [c, []]));
