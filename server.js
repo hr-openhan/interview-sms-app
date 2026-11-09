@@ -341,7 +341,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-45';
+const APP_VERSION = '2026.10.21-49';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -362,7 +362,17 @@ app.use(async (req, res, next) => {
 // --- 경로별 필요한 권한 (표에 없는 /api 경로는 Google 모드에서 소유주만 쓸 수 있게 막아 둡니다) ---
 const R = (method, re, need, leadOk) => ({ method, re, need, leadOk: !!leadOk });   // leadOk: 팀장도 통과(자기 팀인지는 각 처리에서 확인)
 const PERMISSION_RULES = [
-  R('POST',   /^\/api\/templates\/apply-defaults$/, 'diag'),   // 기본 양식으로 바꾸기: 소유주만(비밀번호 로그인은 모두 전체 권한)
+  R('POST',   /^\/api\/templates\/apply-defaults$/, 'diag'),
+  R('GET',    /^\/api\/dashboard$/,              'authed'),   // 오늘 할 일(볼 수 있는 것만 담아요)
+  R('GET',    /^\/api\/tasks$/,                  [['templates', 'view'], ['interviews', 'view'], ['resume', 'view']]),   // 채용과제 양식
+  R('POST',   /^\/api\/tasks$/,                  [['templates', 'edit'], ['resume', 'edit']]),
+  R('PUT',    /^\/api\/tasks\/[^/]+$/,           [['templates', 'edit'], ['resume', 'edit']]),
+  R('DELETE', /^\/api\/tasks\/[^/]+$/,           [['templates', 'edit'], ['resume', 'edit']]),
+  R('GET',    /^\/api\/applicants\/[^/]+\/scorecards$/, [['interviews', 'view'], ['resume', 'view']]),   // 면접 평가표(면접관마다 항목 점수·추천 의견)
+  R('PUT',    /^\/api\/applicants\/[^/]+\/scorecards$/, [['interviews', 'edit'], ['resume', 'edit']], true),
+  R('DELETE', /^\/api\/applicants\/[^/]+\/scorecards\/[^/]+$/, [['interviews', 'edit'], ['resume', 'edit']], true),
+  R('GET',    /^\/api\/applicants\/[^/]+\/task$/, [['interviews', 'view'], ['resume', 'view']]),   // 지원자별 채용과제(팀장은 자기 팀만, 처리에서 확인)
+  R('PUT',    /^\/api\/applicants\/[^/]+\/task$/, [['interviews', 'edit'], ['resume', 'edit']], true),   // 기본 양식으로 바꾸기: 소유주만(비밀번호 로그인은 모두 전체 권한)
   R('GET',    /^\/api\/templates$/,               [['send', 'view'], ['templates', 'view']]),
   R('GET',    /^\/api\/templates\/full$/,         [['templates', 'view']]),
   R('POST',   /^\/api\/templates$/,               [['templates', 'edit']]),
@@ -419,6 +429,9 @@ const PERMISSION_RULES = [
   R('DELETE', /^\/api\/interview-notes\/[^/]+\/comments\/[^/]+$/, [['interviews', 'edit'], ['resume', 'edit']], true),
   R('DELETE', /^\/api\/interview-notes\/[^/]+$/,    [['interviews', 'edit'], ['resume', 'edit']]),
   R('GET',    /^\/api\/resume-locker(\/[^/]+)?$/,   [['interviews', 'edit'], ['resume', 'edit']]),
+  R('GET',    /^\/api\/resume-locker\/[^/]+\/[^/]+\/file$/, [['interviews', 'edit'], ['resume', 'edit']]),
+  R('GET',    /^\/api\/applicants\/[^/]+\/docs(\/[^/]+\/file)?$/, [['interviews', 'view'], ['resume', 'view']]),   // 팀장(면접 관리 보기)도 자기 팀 지원자 서류는 봐요
+  R('POST',   /^\/api\/applicants\/[^/]+\/docs$/,  [['interviews', 'edit'], ['resume', 'edit']], true),
   R('POST',   /^\/api\/resume-locker$/,              [['interviews', 'edit'], ['resume', 'edit']]),
   R('DELETE', /^\/api\/resume-locker\/[^/]+(\/[^/]+)?$/, [['interviews', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/read-applied$/,    [['resume', 'edit']]),
@@ -438,13 +451,13 @@ const PERMISSION_RULES = [
   R('GET',    /^\/api\/notion\/benchmark$/,        [['resume', 'view']]),
   R('POST',   /^\/api\/notion\/register-applicant$/, [['resume', 'edit']]),
   R('GET',    /^\/api\/interview\/bank$/,          [['schedule', 'view'], ['resume', 'view'], ['interviews', 'view']]),
-  R('POST',   /^\/api\/interview\/questions$/,     [['schedule', 'edit'], ['resume', 'edit']]),
+  R('POST',   /^\/api\/interview\/questions$/,     [['schedule', 'edit'], ['resume', 'edit']], true),
   R('POST',   /^\/api\/interview\/questions-pdf$/,     [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/interview\/import$/,        [['schedule', 'edit'], ['resume', 'edit']]),
   R('POST',   /^\/api\/interview\/save-to-notion$/, [['schedule', 'edit'], ['resume', 'edit']]),
   R('GET',    /^\/api\/interview\/card$/,          [['schedule', 'view'], ['resume', 'view'], ['interviews', 'view']]),
   R('GET',    /^\/api\/postings\/stats$/,          [['resume', 'view']]),
-  R('POST',   /^\/api\/interview\/save-answers$/,  [['schedule', 'edit'], ['resume', 'edit']]),
+  R('POST',   /^\/api\/interview\/save-answers$/,  [['schedule', 'edit'], ['resume', 'edit']], true),   // 팀장도 자기 팀 대상자의 답변을 써요(처리에서 팀 확인)
   R('POST',   /^\/api\/logout$/,                  'authed'),
   R('GET',    /^\/api\/(storage-check|smsko-check)$/, 'diag'),   // 설정 진단: Google 모드에서는 소유주만
   R('*',      /^\/api\/admin\//,                  'admin'),      // 권한 관리: 소유주만
@@ -871,6 +884,151 @@ app.get('/api/templates/full', ah(async (req, res) => {
 }));
 
 // 새 양식 추가
+// ---------- 채용과제: 과제 양식(팀·직무별 과제 내용·기한·제출 방법)과 지원자별 과제 진행(보낸 날·마감·제출·평가 메모) ----------
+const TASKS_PATH = path.join(DATA_DIR, 'tasks.json');
+const TASK_LIMITS = { title: 80, body: 3000, method: 200, memo: 3000, count: 200 };
+const loadTasks = async () => { const v = await storeGet('tasks', TASKS_PATH, []); return Array.isArray(v) ? v : []; };
+const taskClean = (b, cur = {}) => {
+  const t = s => String(s ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
+  const title = t(b.title ?? cur.title).slice(0, TASK_LIMITS.title), body = t(b.body ?? cur.body).slice(0, TASK_LIMITS.body);
+  if (!title) return { error: '과제 이름을 입력해주세요.' }; if (!body) return { error: '과제 내용을 입력해주세요.' };
+  const days = Math.max(1, Math.min(60, parseInt(b.days ?? cur.days ?? 7, 10) || 7));
+  return { task: { ...cur, title, body, team: t(b.team ?? cur.team).slice(0, 40), job: t(b.job ?? cur.job).slice(0, 60), days, method: t(b.method ?? cur.method ?? 'job@openhan.kr로 메일 제출').slice(0, TASK_LIMITS.method), updatedAt: new Date().toISOString() } };
+};
+app.get('/api/tasks', ah(async (req, res) => res.json({ tasks: await loadTasks() })));
+app.post('/api/tasks', ah(async (req, res) => {
+  const list = await loadTasks(); if (list.length >= TASK_LIMITS.count) return res.status(400).json({ error: `과제 양식은 ${TASK_LIMITS.count}개까지예요.` });
+  const r = taskClean(req.body || {}); if (r.error) return res.status(400).json({ error: r.error });
+  const task = { id: 'task_' + crypto.randomBytes(5).toString('hex'), ...r.task }; await storeSet('tasks', TASKS_PATH, [...list, task]); res.json({ success: true, task });
+}));
+app.put('/api/tasks/:id', ah(async (req, res) => {
+  const list = await loadTasks(); const i = list.findIndex(x => x.id === req.params.id); if (i < 0) return res.status(404).json({ error: '과제 양식을 찾을 수 없어요.' });
+  const r = taskClean(req.body || {}, list[i]); if (r.error) return res.status(400).json({ error: r.error });
+  list[i] = r.task; await storeSet('tasks', TASKS_PATH, list); res.json({ success: true, task: list[i] });
+}));
+app.delete('/api/tasks/:id', ah(async (req, res) => {
+  const list = await loadTasks(); if (!list.some(x => x.id === req.params.id)) return res.status(404).json({ error: '과제 양식을 찾을 수 없어요.' });
+  await storeSet('tasks', TASKS_PATH, list.filter(x => x.id !== req.params.id)); res.json({ success: true });
+}));
+const ivTaskPath = id => path.join(DATA_DIR, `ivtask-${String(id).replace(/[^0-9A-Za-z_-]/g, '')}.json`);
+const TASK_RESULTS = ['', '제출함', '미제출', '검토 완료'];
+const IVTASK_INDEX_PATH = path.join(DATA_DIR, 'ivtask-index.json');
+// ---------- 오늘 할 일: 단계별 인원 · 오늘 면접 · 과제 마감 임박(3일 안, 아직 제출 전) ----------
+// 볼 수 있는 것만 담아요(팀장은 자기 팀만, 일정 권한이 없으면 일정 빼고). 면접 제안 대기는 화면이 기존 알림 목록에서 세요.
+app.get('/api/dashboard', ah(async (req, res) => {
+  const user = req.auth && req.auth.user; const can = (m, l) => AUTH_MODE !== 'google' || hasPerm(user, m, l || 'view');
+  const kstToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+  const out = { today: kstToday, statusCounts: null, todayInterviews: null, tasksDue: null, source: await dataMode() };
+  if ((can('interviews') || can('resume')) && out.source !== 'off' && AUTH_ON) {
+    try {
+      const counts = {}; let cursor = ''; const leadTeams = user && user.teams ? (user.teamKeys || user.teams) : null;
+      for (let n = 0; n < 10; n++) {
+        const filters = [{ or: NOTION_VISIBLE_STATUSES.map(s => ({ property: '면접상태', select: { equals: s } })) }];
+        if (leadTeams) filters.push({ or: leadTeams.map(t => ({ property: '팀명', select: { equals: t } })) });
+        const r = await notionRequest('POST', `/v1/databases/${NOTION_DB_ID}/query`, { page_size: 100, filter: filters.length > 1 ? { and: filters } : filters[0], ...(cursor ? { start_cursor: cursor } : {}) });
+        for (const p of r.results || []) { const a = pageToApplicant(p); if (isReferencePage(a) || !statusVisible(a.status)) continue; counts[a.status] = (counts[a.status] || 0) + 1; }
+        if (!r.has_more || !r.next_cursor) break; cursor = r.next_cursor;
+      }
+      out.statusCounts = NOTION_VISIBLE_STATUSES.map(s => ({ status: s, count: counts[s] || 0 }));
+    } catch { out.statusCounts = null; }
+  }
+  if (can('schedule')) {
+    const list = (await loadSchedules()).filter(sc => teamAllowed(user, sc.team) && String(sc.interviewAt || '').slice(0, 10) === kstToday && sc.status !== '취소');
+    out.todayInterviews = list.sort((a, b) => String(a.interviewAt).localeCompare(String(b.interviewAt))).slice(0, 20).map(sc => ({ id: sc.id, name: sc.name, team: sc.team, time: String(sc.interviewAt).slice(11, 16), round: sc.round || '', location: sc.location || '' }));
+  }
+  if (can('interviews') || can('resume')) {
+    const ids = await storeGet('ivtask-index', IVTASK_INDEX_PATH, []); const due = [];
+    const limit = new Date(Date.parse(kstToday + 'T00:00:00+09:00') + 3 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+    for (const id of (Array.isArray(ids) ? ids : []).slice(-200)) {
+      const t = await storeGet(`ivtask:${id}`, ivTaskPath(id), null);
+      if (!t || !t.dueAt || t.submittedAt || ['제출함', '검토 완료'].includes(t.result) || t.dueAt > limit) continue;
+      if (!teamAllowed(user, t.team)) continue;
+      due.push({ id, name: t.name || '', team: t.team || '', title: t.title || '', dueAt: t.dueAt, overdue: t.dueAt < kstToday });
+    }
+    out.tasksDue = due.sort((a, b) => a.dueAt.localeCompare(b.dueAt)).slice(0, 20);
+  }
+  res.json(out);
+}));
+// ---------- 면접 평가표: 면접관마다(로그인한 사람) 차수별로 한 장. 항목별 1~5점 + 추천 의견 + 한 줄 평. 평균은 서버가 계산해요 ----------
+const SCORE_ITEMS = [
+  { key: 'job', label: '직무 역량', hint: '직무에 필요한 지식·경험을 실제 사례로 보여줬나요' },
+  { key: 'problem', label: '문제 해결', hint: '상황을 나누어 생각하고 근거 있게 답했나요' },
+  { key: 'comm', label: '소통·협업', hint: '질문을 이해하고 명확하게 전달했나요, 협업 경험이 구체적인가요' },
+  { key: 'fit', label: '인재상 적합', hint: '회사 인재상(설정의 공통 인재상)과 맞는 행동을 보여줬나요' },
+  { key: 'growth', label: '성장 가능성', hint: '배우려는 태도와 스스로 개선한 경험이 있나요' },
+];
+const SCORE_VERDICTS = ['적극 추천', '추천', '보류', '비추천'];
+const SCORE_ROUNDS = ['1차', '2차'];
+const scorePath = id => path.join(DATA_DIR, `ivscore-${String(id).replace(/[^0-9A-Za-z_-]/g, '')}.json`);
+function scoreSummary(cards) {
+  const out = {};
+  for (const r of SCORE_ROUNDS) {
+    const cs = cards.filter(c => c.round === r); if (!cs.length) continue;
+    const avg = {}; for (const it of SCORE_ITEMS) { const v = cs.map(c => c.scores[it.key]).filter(n => n >= 1); avg[it.key] = v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10 : null; }
+    const all = cs.flatMap(c => SCORE_ITEMS.map(it => c.scores[it.key]).filter(n => n >= 1));
+    const verdicts = {}; cs.forEach(c => { if (c.verdict) verdicts[c.verdict] = (verdicts[c.verdict] || 0) + 1; });
+    out[r] = { count: cs.length, avg, overall: all.length ? Math.round(all.reduce((a, b) => a + b, 0) / all.length * 10) / 10 : null, verdicts };
+  }
+  return out;
+}
+app.get('/api/applicants/:id/scorecards', ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const rec = (await storeGet(`ivscore:${req.params.id}`, scorePath(req.params.id), null)) || { cards: [] };
+  const me = noteWho(req).by || '';
+  res.json({ items: SCORE_ITEMS, verdicts: SCORE_VERDICTS, rounds: SCORE_ROUNDS, cards: rec.cards.map(c => ({ ...c, mine: c.by === me })), summary: scoreSummary(rec.cards) });
+}));
+app.put('/api/applicants/:id/scorecards', ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const b = req.body || {}; const round = String(b.round || '');
+  if (!SCORE_ROUNDS.includes(round)) return res.status(400).json({ error: '면접 차수(1차·2차)를 골라주세요.' });
+  const scores = {}; for (const it of SCORE_ITEMS) { const n = Number((b.scores || {})[it.key]); if (!Number.isInteger(n) || n < 1 || n > 5) return res.status(400).json({ error: `"${it.label}" 점수를 1~5점으로 골라주세요.` }); scores[it.key] = n; }
+  const verdict = String(b.verdict || ''); if (!SCORE_VERDICTS.includes(verdict)) return res.status(400).json({ error: '추천 의견(적극 추천·추천·보류·비추천)을 골라주세요.' });
+  const comment = String(b.comment || '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
+  if (comment.length > 1000) return res.status(400).json({ error: '한 줄 평은 1000자 이내로 써주세요.' });
+  if (comment && IQ_BANNED.test(comment)) return res.status(400).json({ error: `한 줄 평에 "${(comment.match(IQ_BANNED) || [''])[0]}"처럼 평가에 쓰면 안 되는 내용이 있어요. 면접에서 관찰한 행동과 근거만 적어주세요.` });
+  const who = noteWho(req); const rec = (await storeGet(`ivscore:${req.params.id}`, scorePath(req.params.id), null)) || { cards: [] };
+  const i = rec.cards.findIndex(c => c.by === who.by && c.round === round);
+  const card = { by: who.by, name: who.name, round, scores, verdict, comment, at: new Date().toISOString() };
+  if (i >= 0) rec.cards[i] = card; else { if (rec.cards.length >= 40) return res.status(400).json({ error: '평가표가 너무 많아요(40장까지).' }); rec.cards.push(card); }
+  rec.team = a.team; await storeSet(`ivscore:${req.params.id}`, scorePath(req.params.id), rec);
+  res.json({ success: true, card, summary: scoreSummary(rec.cards) });
+}));
+app.delete('/api/applicants/:id/scorecards/:round', ah(async (req, res) => {   // 내 평가표 지우기(소유주는 ?by=로 다른 사람 것도)
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const u = req.auth && req.auth.user; const isOwner = AUTH_MODE !== 'google' || (u && u.role === 'owner');
+  const by = isOwner && req.query.by !== undefined ? String(req.query.by) : noteWho(req).by;
+  const rec = (await storeGet(`ivscore:${req.params.id}`, scorePath(req.params.id), null)) || { cards: [] };
+  const before = rec.cards.length; rec.cards = rec.cards.filter(c => !(c.by === by && c.round === req.params.round));
+  if (rec.cards.length === before) return res.status(404).json({ error: '지울 평가표가 없어요.' });
+  await storeSet(`ivscore:${req.params.id}`, scorePath(req.params.id), rec); res.json({ success: true, summary: scoreSummary(rec.cards) });
+}));
+app.get('/api/applicants/:id/task', ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  res.json({ task: (await storeGet(`ivtask:${req.params.id}`, ivTaskPath(req.params.id), null)) || null });
+}));
+app.put('/api/applicants/:id/task', ah(async (req, res) => {   // 지원자에게 낸 과제와 진행(보낸 날·마감·제출·평가 메모)을 저장해요. 팀장은 자기 팀 대상자의 제출·평가 메모만 써요
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const b = req.body || {}; const cur = (await storeGet(`ivtask:${req.params.id}`, ivTaskPath(req.params.id), null)) || {};
+  if (b.expectedAt !== undefined && String(b.expectedAt || '') !== String(cur.updatedAt || '')) return res.status(409).json({ error: '방금 다른 사람이 이 과제 기록을 고쳤어요. 아무것도 덮어쓰지 않았어요. 새로고침해서 확인해주세요.', conflict: true, task: cur });
+  const lead = req.auth && req.auth.user && req.auth.user.role === 'teamlead';
+  const date = v => { const s = String(v ?? '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; };
+  const out = { ...cur };
+  if (!lead) {
+    if (b.taskId !== undefined) { const t = (await loadTasks()).find(x => x.id === b.taskId); if (b.taskId && !t) return res.status(400).json({ error: '과제 양식을 찾을 수 없어요.' }); out.taskId = t ? t.id : ''; out.title = t ? t.title : ''; out.body = t ? t.body : ''; }
+    if (b.body !== undefined) out.body = String(b.body).slice(0, TASK_LIMITS.body);
+    if (b.sentAt !== undefined) out.sentAt = date(b.sentAt);
+    if (b.dueAt !== undefined) out.dueAt = date(b.dueAt);
+  }
+  if (b.submittedAt !== undefined) out.submittedAt = date(b.submittedAt);
+  if (b.result !== undefined) { if (!TASK_RESULTS.includes(b.result)) return res.status(400).json({ error: '진행 상태는 제출함·미제출·검토 완료 중에서 골라주세요.' }); out.result = b.result; }
+  if (b.memo !== undefined) { if (String(b.memo).length > TASK_LIMITS.memo) return res.status(400).json({ error: `평가 메모는 ${TASK_LIMITS.memo}자 이내로 써주세요.` }); out.memo = String(b.memo); }
+  if (out.memo && IQ_BANNED.test(out.memo)) return res.status(400).json({ error: `평가 메모에 "${(out.memo.match(IQ_BANNED) || [''])[0]}"처럼 평가에 쓰면 안 되는 내용이 있어요. 과제 결과물에 대한 의견만 적어주세요.` });
+  const who = noteWho(req); out.updatedAt = new Date().toISOString(); out.updatedBy = who.name; out.name = a.name; out.team = a.team;
+  await storeSet(`ivtask:${req.params.id}`, ivTaskPath(req.params.id), out);
+  const idx = await storeGet('ivtask-index', IVTASK_INDEX_PATH, []); if (!idx.includes(req.params.id)) await storeSet('ivtask-index', IVTASK_INDEX_PATH, [...idx, req.params.id].slice(-500));   // 오늘 할 일(과제 마감 임박)에 써요
+  res.json({ success: true, task: out });
+}));
+
 // 앱에 들어 있는 기본 양식(templates.json)으로 저장된 양식을 바꿔요. 같은 번호(id)의 양식은 이름·본문을 새 것으로, 없던 기본 양식은 추가하고,
 // 회사에서 따로 만든 양식(기본 양식에 없는 번호)은 그대로 둬요. 저장소에 양식이 있으면 파일만 바꿔서는 반영되지 않아서 필요해요.
 app.post('/api/templates/apply-defaults', ah(async (req, res) => {
@@ -3050,6 +3208,7 @@ app.delete('/api/interview-notes/:id', ah(async (req, res) => {   // 이 지원�
   const id = noteIdOf(req, res); if (!id) return;
   const u = req.auth && req.auth.user; if (AUTH_MODE === 'google' && !(u && u.role === 'owner')) return forbidden(res, '면접 기록을 통째로 지우는 건 소유주만 할 수 있어요.');
   await storeRemove(`ivnotes:${id}`, notePath(id));
+  await storeRemove(`ivscore:${id}`, scorePath(id)).catch(() => {});   // 면접 평가표도 함께 지워요
   res.json({ success: true });
 }));
 
@@ -3058,6 +3217,9 @@ app.delete('/api/interview-notes/:id', ah(async (req, res) => {   // 이 지원�
 // 올린 파일은 이름(파일 이름·본문의 "성명")으로 같은 사람끼리 묶어요. 같은 이름이 여러 명이면 연락처로 가르고, 그래도 모르면 사람이 골라요.
 // 같은 파일(내용이 같은 PDF)은 다시 저장하지 않아요. 같은 사람에게 이름이 같은 파일을 새로 올리면 새 내용으로 바꿔요.
 const LOCKER_LIMITS = { docs: 15, text: 60000, minText: 40, persons: 3000 };
+const { createFileStore } = require('./file-store');
+const fileStore = createFileStore({ dataDir: DATA_DIR });   // PDF 원본: Vercel Blob(비공개) 또는 서버 폴더. 없으면 글자만 저장해요
+const lockerFileKey = (pid, hash) => `${pid}/${hash}.pdf`;
 const LOCKER_INDEX_PATH = path.join(DATA_DIR, 'rlocker-index.json');
 const lockerPath = pid => path.join(DATA_DIR, `rlocker-${String(pid).replace(/[^0-9A-Za-z_-]/g, '')}.json`);
 const rhashPath = h => path.join(DATA_DIR, `rdochash-${String(h).replace(/[^0-9a-f]/g, '').slice(0, 64)}.json`);
@@ -3074,7 +3236,7 @@ function lockerKind(fname, text) {
   if (/경력\s*기술서/.test(t)) return '경력기술서';
   if (/자기\s*소개서|자소서/.test(t)) return '자기소개서';
   if (/자격증|증명서|certificate|토익|toeic|오픽|opic|어학/.test(t)) return '자격증·증명서';
-  if (/이력서|resume|\bcv\b|입사\s*지원서/.test(t)) return '이력서';
+  if (/이\s*력\s*서|resume|\bcv\b|입사\s*지원서/.test(t)) return '이력서';
   return '기타';
 }
 function lockerGuessName(fname, text) {
@@ -3090,7 +3252,7 @@ function lockerGuessName(fname, text) {
 }
 async function lockerSaveIndex(list) { await storeSet('rlocker-index', LOCKER_INDEX_PATH, list.slice(0, LOCKER_LIMITS.persons)); }
 const lockerSummary = p => ({ pid: p.pid, name: p.name, phone: phoneTail(p.phone), count: p.docs.length, kinds: [...new Set(p.docs.map(d => d.kind))], updatedAt: p.updatedAt });
-const lockerDocMeta = d => ({ hash: d.hash, name: d.name, kind: d.kind, chars: (d.text || '').length, noText: !(d.text || '').length, at: d.at, byName: d.byName || '', preview: String(d.text || '').slice(0, 400) });
+const lockerDocMeta = d => ({ hash: d.hash, name: d.name, kind: d.kind, chars: (d.text || '').length, noText: !(d.text || '').length, hasFile: !!d.file, at: d.at, byName: d.byName || '', preview: String(d.text || '').slice(0, 400) });
 // 파일 하나를 보관함에 넣어요. force: { name, phone, pid } 로 사람을 정해 줄 수 있어요(지원자 화면·질문 추천에서 올릴 때, 사람이 골랐을 때)
 async function lockerAddFile(file, req, force = {}) {
   const fname = String(file.name || '서류.pdf').replace(/[\u0000-\u001f/\\]/g, '').slice(0, 120);
@@ -3117,8 +3279,11 @@ async function lockerAddFile(file, req, force = {}) {
   if (phone && !person.phone) person.phone = phone;
   const who = noteWho(req);
   const doc = { hash, name: fname, kind: lockerKind(fname, text), text: text.slice(0, LOCKER_LIMITS.text), at: new Date().toISOString(), by: who.by, byName: who.name };
-  const i = person.docs.findIndex(d => d.name === fname); let status = 'saved';
-  if (i >= 0) { const old = person.docs[i]; person.docs[i] = doc; status = 'replaced'; await storeRemove(`rdochash:${old.hash}`, rhashPath(old.hash)).catch(() => {}); }
+  const i0 = person.docs.findIndex(d => d.name === fname);
+  if (i0 < 0 && person.docs.length >= LOCKER_LIMITS.docs) return { status: 'error', file: fname, message: `한 사람에게 ${LOCKER_LIMITS.docs}개까지 넣을 수 있어요.` };
+  try { if (await fileStore.put(lockerFileKey(pid, hash), file.data)) doc.file = lockerFileKey(pid, hash); } catch (e) { console.error('[파일 저장 실패]', e.message); }   // 원본 PDF(못 넣어도 글자는 저장해요)
+  const i = i0; let status = 'saved';
+  if (i >= 0) { const old = person.docs[i]; person.docs[i] = doc; status = 'replaced'; await storeRemove(`rdochash:${old.hash}`, rhashPath(old.hash)).catch(() => {}); if (old.file && old.file !== doc.file) await fileStore.del(old.file).catch(() => {}); }
   else { if (person.docs.length >= LOCKER_LIMITS.docs) return { status: 'error', file: fname, message: `한 사람에게 ${LOCKER_LIMITS.docs}개까지 넣을 수 있어요.` }; person.docs.push(doc); }
   person.updatedAt = doc.at;
   await storeSet(`rlocker:${pid}`, lockerPath(pid), person);
@@ -3163,16 +3328,58 @@ app.delete('/api/resume-locker/:pid/:hash', ah(async (req, res) => {
   if (!LOCKER_PID_RE.test(req.params.pid)) return res.status(400).json({ error: '사람을 확인할 수 없어요.' });
   const p = await loadLockerPerson(req.params.pid); const d = p && p.docs.find(x => x.hash === req.params.hash);
   if (!d) return res.status(404).json({ error: '파일을 찾을 수 없어요.' });
-  p.docs = p.docs.filter(x => x.hash !== d.hash); await storeRemove(`rdochash:${d.hash}`, rhashPath(d.hash)).catch(() => {});
+  p.docs = p.docs.filter(x => x.hash !== d.hash); await storeRemove(`rdochash:${d.hash}`, rhashPath(d.hash)).catch(() => {}); if (d.file) await fileStore.del(d.file).catch(() => {});
   const rest = (await loadLockerIndex()).filter(x => x.pid !== p.pid);
   if (p.docs.length) { await storeSet(`rlocker:${p.pid}`, lockerPath(p.pid), p); await lockerSaveIndex([{ ...lockerSummary(p), phoneFull: p.phone }, ...rest]); }
   else { await storeRemove(`rlocker:${p.pid}`, lockerPath(p.pid)); await lockerSaveIndex(rest); }
   res.json({ success: true, removedPerson: !p.docs.length });
 }));
+async function sendLockerPdf(res, d) {
+  if (!d.file) return res.status(404).json({ error: '원본 PDF가 저장돼 있지 않아요(글자만 있어요).' });
+  const buf = await fileStore.get(d.file).catch(() => null); if (!buf) return res.status(404).json({ error: '원본 PDF를 찾을 수 없어요.' });
+  res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(d.name || 'resume.pdf')}`); res.send(buf);
+}
+app.get('/api/resume-locker/:pid/:hash/file', ah(async (req, res) => {
+  if (!LOCKER_PID_RE.test(req.params.pid)) return res.status(400).json({ error: '사람을 확인할 수 없어요.' });
+  const p = await loadLockerPerson(req.params.pid); const d = p && p.docs.find(x => x.hash === req.params.hash);
+  if (!d) return res.status(404).json({ error: '파일을 찾을 수 없어요.' }); return sendLockerPdf(res, d);
+}));
+// 지원자 페이지의 서류: 지원자(이름·연락처)로 보관함의 그 사람을 찾아요. 팀장은 자기 팀 지원자만(서버가 팀을 확인해요)
+async function applicantForDocs(req, res) {
+  const id = String(req.params.id || ''); if (!NOTE_ID_RE.test(id)) { res.status(400).json({ error: '지원자를 확인할 수 없어요.' }); return null; }
+  let a; try { a = pageToApplicant(await notionRequest('GET', `/v1/pages/${id}`)); } catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message || '지원자를 불러오지 못했어요.' }); return null; }
+  if (!teamAllowed(req.auth && req.auth.user, a.team)) { forbidden(res, '이 지원자는 담당 팀이 아니라서 볼 수 없어요.'); return null; }
+  return a;
+}
+app.get('/api/applicants/:id/docs', ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const f = await lockerFind(a.name, a.phone);
+  res.json({ docs: f.person ? f.person.docs.map(lockerDocMeta) : [], note: f.note || '', fileStore: fileStore.kind });
+}));
+app.get('/api/applicants/:id/docs/:hash/file', ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const f = await lockerFind(a.name, a.phone); const d = f.person && f.person.docs.find(x => x.hash === req.params.hash);
+  if (!d) return res.status(404).json({ error: '파일을 찾을 수 없어요.' }); return sendLockerPdf(res, d);
+}));
+app.post('/api/applicants/:id/docs', lockerPdfBody, ah(async (req, res) => {
+  const a = await applicantForDocs(req, res); if (!a) return;
+  const buf = req.body; if (!Buffer.isBuffer(buf) || buf.subarray(0, 5).toString('latin1') !== '%PDF-') return res.status(400).json({ error: 'PDF 파일만 올릴 수 있어요.' });
+  const r = await lockerAddFile({ name: String(req.query.filename || '서류.pdf'), data: buf }, req, { name: a.name, phone: a.phone, newPerson: true });
+  res.status(r.status === 'error' ? 400 : 200).json({ success: r.status !== 'error', ...r });
+}));
+app.delete('/api/resume-locker/by-person', ah(async (req, res) => {   // 서류탈락: 이름(+연락처)으로 찾은 한 사람의 서류 글을 지워요. 같은 이름이 여럿이라 못 고르면 지우지 않아요
+  const f = await lockerFind(req.query.name, req.query.phone);
+  if (!f.person) return res.json({ success: true, deleted: false, note: f.note || '' });
+  for (const d of f.person.docs) { await storeRemove(`rdochash:${d.hash}`, rhashPath(d.hash)).catch(() => {}); if (d.file) await fileStore.del(d.file).catch(() => {}); }
+  await storeRemove(`rlocker:${f.person.pid}`, lockerPath(f.person.pid));
+  await lockerSaveIndex((await loadLockerIndex()).filter(x => x.pid !== f.person.pid));
+  res.json({ success: true, deleted: true });
+}));
 app.delete('/api/resume-locker/:pid', ah(async (req, res) => {   // 그 사람의 서류를 모두 지워요(개인정보라 정말 지워요)
   if (!LOCKER_PID_RE.test(req.params.pid)) return res.status(400).json({ error: '사람을 확인할 수 없어요.' });
   const p = await loadLockerPerson(req.params.pid); if (!p) return res.status(404).json({ error: '보관함에 없는 사람이에요.' });
-  for (const d of p.docs) await storeRemove(`rdochash:${d.hash}`, rhashPath(d.hash)).catch(() => {});
+  for (const d of p.docs) { await storeRemove(`rdochash:${d.hash}`, rhashPath(d.hash)).catch(() => {}); if (d.file) await fileStore.del(d.file).catch(() => {}); }
   await storeRemove(`rlocker:${p.pid}`, lockerPath(p.pid));
   await lockerSaveIndex((await loadLockerIndex()).filter(x => x.pid !== p.pid));
   res.json({ success: true });
@@ -3995,6 +4202,7 @@ async function runInterviewQuestions(req, res, { uploadBlocks = null, uploadName
     if (b.stage !== undefined && !['1차', '2차'].includes(b.stage)) return res.status(400).json({ error: '면접 단계는 1차 또는 2차로 골라주세요.' });
     if (b.minutes !== undefined && ![30, 45, 60].includes(Number(b.minutes))) return res.status(400).json({ error: '면접 시간은 30분, 45분, 60분 중에서 골라주세요.' });
     if (mode === 'ai' && !anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY가 설정되지 않았습니다. API 없이 쓰려면 "요청문 복사" 방식을 고르세요.' });
+    if (!(await leadTeamOk(req, res, id))) return;
     const page = await notionRequest('GET', `/v1/pages/${id}`);
     const basis = cardToResumeBasis(page);
     const criteria = await loadCriteria();
@@ -4132,11 +4340,18 @@ app.get('/api/interview/card', requireNotion, ah(async (req, res) => {
     res.json(out);
   } catch (err) { sendNotionError(res, err); }
 }));
+// 팀장은 자기 팀 면접 대상자에게만 질문 추천·답변 쓰기를 해요(팀장이 아니면 그대로 통과)
+async function leadTeamOk(req, res, id) {
+  const u = req.auth && req.auth.user; if (!u || u.role !== 'teamlead') return true;
+  try { const a = pageToApplicant(await notionRequest('GET', `/v1/pages/${id}`)); if (teamAllowed(u, a.team)) return true; } catch { /* 아래에서 막아요 */ }
+  forbidden(res, '이 지원자는 담당 팀이 아니라서 면접 답변을 쓸 수 없어요.'); return false;
+}
 app.post('/api/interview/save-answers', requireNotion, ah(async (req, res) => {
   try {
     const b = req.body || {};
     const id = String(b.applicantId || '').trim();
     if (!NOTION_ID_RE.test(id)) return res.status(400).json({ error: '노션 지원자를 선택해주세요.' });
+    if (!(await leadTeamOk(req, res, id))) return;
     if (!Array.isArray(b.items) || b.items.length > 60) return res.status(400).json({ error: '보낼 답변 목록이 올바르지 않아요(60개 이내).' });
     const items = b.items.map(x => {
       const sc = Number(x && x.score);
@@ -4370,7 +4585,8 @@ const todayKst = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/
 const addYearsIso = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCFullYear(d.getUTCFullYear() + n); return d.toISOString().slice(0, 10); };
 function resultExpiry(entry, pid, ret) {
   if (entry.hired && isIsoDay(entry.hired.date)) return addYearsIso(entry.hired.date, ret.hiredYears);   // 인사서류: 합격 확정일부터 N년
-  const base = ret.confirmed[pid] || String(entry.savedAt || '').slice(0, 10) || todayKst();
+  const saved = entry.savedAt && !isNaN(Date.parse(entry.savedAt)) ? new Date(entry.savedAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) : '';   // 저장 시각을 한국 날짜로(새벽 0~9시에 저장한 결과가 하루 일찍 지워지지 않게)
+  const base = ret.confirmed[pid] || saved || todayKst();
   return addDaysIso(base, ret.days);
 }
 async function appendPurgeLog(rec) {
@@ -4417,22 +4633,29 @@ function takePdf(req, res) {
 }
 
 // 이력서에 적힌 "지원분야"만 읽어요(어느 공고에 낸 이력서인지 사람이 고를 때 참고하는 값이에요).
-// 사람인 이력서 첫 쪽의 "지원분야 : … 입사지원일 : …" 줄만 읽고, AI를 부르지 않아요. 이름·연락처 등 다른 내용은 읽어도 돌려주거나 저장하지 않아요.
+// 사람인 이력서 첫 쪽의 "지원분야 : … 입사지원일 : …" 줄만 읽고, AI를 부르지 않아요. 같은 사람 서류를 묶으려고 이름(첫 쪽의 "성명"·파일 이름)과 서류 종류도 돌려주지만 저장하지 않고, 연락처·학교·경력은 돌려주지 않아요.
 // 읽지 못하면(스캔본·잡코리아 형식 등 지원분야 줄이 없는 파일) 오류가 아니라 appliedFor가 빈 값이에요.
 const APPLIED_RE = /(?:지원\s*분야|지원\s*공고|지원\s*직무|지원\s*포지션)\s*[:：]\s*([^\n]*?)\s*(?:입사\s*지원일|\n|$)/;
-async function readAppliedFor(buf) {
+async function readFirstPageText(buf) {
   let pdfParse; try { pdfParse = require('pdf-parse/lib/pdf-parse.js'); } catch { return ''; }   // 기본 진입점은 자체 시험 파일을 읽으려는 문제가 있어 lib을 바로 불러요
   const parsed = await withTimeout(pdfParse(buf, { max: 1 }), 5000, 'PDF 읽기');
-  const text = String((parsed && parsed.text) || '').replace(/\u0000/g, ':').replace(/[\u00a0\u3000]/g, ' ').replace(/[ \t]+/g, ' ');   // PDF에 따라 콜론이 널 문자로 읽혀요
+  return String((parsed && parsed.text) || '').replace(/\u0000/g, ':').replace(/[\u00a0\u3000]/g, ' ').replace(/[ \t]+/g, ' ');   // PDF에 따라 콜론이 널 문자로 읽혀요
+}
+function appliedFromText(text) {
   const m = APPLIED_RE.exec(text);
   return m ? m[1].replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
 }
+async function readAppliedFor(buf) { return appliedFromText(await readFirstPageText(buf)); }
 app.post('/api/resume/read-applied', pdfBody, ah(async (req, res) => {
   const buf = takePdf(req, res);
   if (!buf) return;
-  let appliedFor = '';
-  try { appliedFor = await readAppliedFor(buf); } catch { appliedFor = ''; }   // 깨진 PDF·시간 초과도 "못 읽음"으로 돌려요
-  res.json({ success: true, appliedFor });
+  let appliedFor = '', name = '', kind = '';
+  try {
+    const text = await readFirstPageText(buf); appliedFor = appliedFromText(text);
+    const fname = String(req.query.filename || '').slice(0, 200);
+    name = lockerGuessName(fname, text); kind = lockerKind(fname, text);   // 여러 서류를 같은 사람끼리 묶을 때 써요(첫 쪽의 "성명"·파일 이름). 이름만 돌려주고 저장하지 않아요
+  } catch { appliedFor = ''; }   // 깨진 PDF·시간 초과도 "못 읽음"으로 돌려요
+  res.json({ success: true, appliedFor, name, kind });
 }));
 
 app.post('/api/resume/analyze', pdfBody, ah(async (req, res) => {
@@ -4448,9 +4671,9 @@ app.post('/api/resume/analyze', pdfBody, ah(async (req, res) => {
   } catch (err) { sendScreeningError(res, err, 'resume-analyze'); }
 }));
 
-// 한 사람의 서류 여러 개(최대 4개, 합계 PDF_MAX_BYTES 이하)를 한 번에 받아 통합 평가해요.
+// 한 사람의 서류 여러 개(최대 8개, 합계 PDF_MAX_BYTES 이하)를 한 번에 받아 통합 평가해요.
 // 본문 형식(big-endian): [파일 수 4바이트] 이어서 파일마다 [이름 길이 4바이트][이름 UTF-8][내용 크기 4바이트][PDF 내용]. base64로 부풀리지 않아서 합계 4MB까지 쓸 수 있어요.
-const BUNDLE_MAX_FILES = 4;
+const BUNDLE_MAX_FILES = 8;   // 한 사람의 서류(이력서·포트폴리오·경력기술서·자기소개서·자격증 등)
 const bundleBody = express.raw({ type: 'application/octet-stream', limit: PDF_MAX_BYTES + 4096 });
 function takePdfBundle(req, res) {
   const buf = req.body; const bad = m => { res.status(400).json({ error: m }); return null; };
@@ -4701,9 +4924,46 @@ async function copyBlocksDeep(id, depth, cnt) {
     } else if (b.has_children && b.type !== 'child_page' && depth < 2) await copyBlocksDeep(b.id, depth + 1, cnt);
   }
 }
+// 카드 본문에 붙은 PDF(이력서·포트폴리오 등)를 내려받아 이력서 보관함에 넣어요(노션 파일 주소는 1시간 뒤 만료돼서 지금 옮겨야 해요)
+async function copyCardPdfs(page, cnt) {
+  const a = pageToApplicant(page); const blocks = await localNotion.request('GET', `/v1/blocks/${page.id}/children?page_size=100`).then(r => r.results || []).catch(() => []);
+  const fakeReq = { auth: { user: { email: '', name: '노션 가져오기' } } };
+  for (const b of blocks) {
+    const v = b[b.type]; if (!v || !['pdf', 'file'].includes(b.type)) continue;
+    const url = v.type === 'file' ? (v.file && v.file.url) : (v.external && v.external.url); if (!url) continue;
+    const name = (plainCaption(v) || decodeURIComponent(String(url).split('?')[0].split('/').pop() || '서류.pdf')).slice(0, 120);
+    const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 20000, maxContentLength: 8 * 1024 * 1024 });
+    const buf = Buffer.from(r.data); if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') continue;
+    const out = await lockerAddFile({ name: /\.pdf$/i.test(name) ? name : name + '.pdf', data: buf }, fakeReq, { name: a.name, phone: a.phone, newPerson: true });
+    if (out.status === 'saved' || out.status === 'replaced') cnt.files = (cnt.files || 0) + 1;
+  }
+}
+const plainCaption = v => (Array.isArray(v.caption) ? v.caption : []).map(t => t.plain_text || (t.text && t.text.content) || '').join('').trim() || String(v.name || '').trim();
 app.get('/api/data-source', ah(async (req, res) => {
   const meta = await lnMeta(true); const st = await storeGet('ln:import', LN_IMPORT_PATH, null);
-  res.json({ mode: await dataMode(), notionToken: !!process.env.NOTION_TOKEN, envForced: !!process.env.DATA_SOURCE, importedAt: meta.importedAt || '', counts: meta.counts || null, progress: st && st.phase !== 'done' ? { phase: st.phase, pages: st.cnt.pages, skipped: st.cnt.skipped } : null });
+  res.json({ mode: await dataMode(), notionToken: !!process.env.NOTION_TOKEN, envForced: !!process.env.DATA_SOURCE, importedAt: meta.importedAt || '', counts: meta.counts || null, switchedBackAt: meta.switchedBackAt || '', fileStore: fileStore.kind, progress: st && st.phase !== 'done' ? { phase: st.phase, pages: st.cnt.pages, skipped: st.cnt.skipped } : null });
+}));
+// 옮기기 전에 몇 명을 옮기는지 미리 세요(노션에서 읽기만 해요)
+app.get('/api/data-source/preview', ah(async (req, res) => {
+  if (!process.env.NOTION_TOKEN) return res.status(400).json({ error: 'NOTION_TOKEN이 없어서 미리 볼 수 없어요.' });
+  const byStatus = {}; let people = 0, skipped = 0, cursor = '';
+  try {
+    for (let n = 0; n < 30; n++) {
+      const r = await remoteRetry('POST', `/v1/databases/${NOTION_DB_ID}/query`, { page_size: 100, filter: { or: NOTION_VISIBLE_STATUSES.map(x => ({ property: '면접상태', select: { equals: x } })) }, ...(cursor ? { start_cursor: cursor } : {}) });
+      for (const p of r.results || []) { const a = pageToApplicant(p); if (isReferencePage(a)) { skipped++; continue; } people++; byStatus[a.status] = (byStatus[a.status] || 0) + 1; }
+      if (!r.has_more || !r.next_cursor) break; cursor = r.next_cursor;
+    }
+  } catch (err) { return res.status(502).json({ error: `노션을 읽지 못했어요: ${err.message}` }); }
+  res.json({ people, skipped, byStatus });
+}));
+// 앱 저장소 ↔ 노션 되돌리기(옮긴 뒤 문제가 있을 때). 되돌리면 그 사이 앱에서 바꾼 내용은 노션에 없어요
+app.post('/api/data-source/switch', ah(async (req, res) => {
+  const to = String((req.body || {}).to || ''); const meta = await lnMeta(true);
+  if (process.env.DATA_SOURCE) return res.status(400).json({ error: '서버 환경변수 DATA_SOURCE로 정해져 있어서 화면에서 바꿀 수 없어요.' });
+  if (to === 'notion') { if (!process.env.NOTION_TOKEN) return res.status(400).json({ error: 'NOTION_TOKEN이 없어서 노션으로 되돌릴 수 없어요.' }); await saveLnMeta({ ...meta, mode: 'notion', switchedBackAt: new Date().toISOString() }); }
+  else if (to === 'app') { if (!meta.importedAt) return res.status(400).json({ error: '아직 옮긴 적이 없어요. 먼저 옮기기를 해주세요.' }); await saveLnMeta({ ...meta, mode: 'local' }); }
+  else return res.status(400).json({ error: '어디로 바꿀지 알 수 없어요.' });
+  notionSchemaCache = null; res.json({ success: true, mode: await dataMode() });
 }));
 app.post('/api/data-source/import', ah(async (req, res) => {
   if (!process.env.NOTION_TOKEN) return res.status(400).json({ error: '노션에서 가져오려면 NOTION_TOKEN이 아직 필요해요. 가져오기가 끝난 뒤에 지워주세요.' });
@@ -4711,18 +4971,19 @@ app.post('/api/data-source/import', ah(async (req, res) => {
   if (meta.mode === 'local' && !(req.body && req.body.again === true)) return res.status(409).json({ error: '이미 앱 저장소로 옮겼어요. 다시 가져오면 앱에서 바꾼 내용이 노션 내용으로 덮어써져요.', already: true });
   let st = await storeGet('ln:import', LN_IMPORT_PATH, null);
   if (!st || st.phase === 'done' || (req.body && req.body.restart === true)) st = { phase: 'schema', cursor: '', cnt: { pages: 0, skipped: 0, blocks: 0, dbs: 0, rows: 0 }, startedAt: new Date().toISOString() };
-  const t0 = Date.now(); const BUDGET = 7000;
+  const t0 = Date.now(); const BUDGET = 5000;   // 한 번 호출에 5초 안팎만 일하고 나머지는 다음 호출에서 이어가요(Vercel 시간 제한)
   try {
     if (st.phase === 'schema') {
       const db = await remoteRetry('GET', `/v1/databases/${NOTION_DB_ID}`); await localNotion.putDb(db); await localNotion.putRowsOrder(NOTION_DB_ID, []);
       st.phase = 'pages'; st.cursor = '';
     }
     while (st.phase === 'pages' && Date.now() - t0 < BUDGET) {
-      const body = { page_size: 3, filter: { or: NOTION_VISIBLE_STATUSES.map(x => ({ property: '면접상태', select: { equals: x } })) }, sorts: [{ timestamp: 'created_time', direction: 'descending' }], ...(st.cursor ? { start_cursor: st.cursor } : {}) };
+      const body = { page_size: 1, filter: { or: NOTION_VISIBLE_STATUSES.map(x => ({ property: '면접상태', select: { equals: x } })) }, sorts: [{ timestamp: 'created_time', direction: 'descending' }], ...(st.cursor ? { start_cursor: st.cursor } : {}) };
       const r = await remoteRetry('POST', `/v1/databases/${NOTION_DB_ID}/query`, body);
       for (const page of r.results || []) {
         if (isReferencePage(pageToApplicant(page))) { st.cnt.skipped++; continue; }
         await localNotion.putPage(page, NOTION_DB_ID); await copyBlocksDeep(page.id, 0, st.cnt); st.cnt.pages++;
+        await copyCardPdfs(page, st.cnt).catch(e => { st.cnt.fileErrors = (st.cnt.fileErrors || 0) + 1; console.error('[가져오기 PDF]', e.message); });
       }
       if (!r.has_more || !r.next_cursor) st.phase = 'finish'; else st.cursor = r.next_cursor;
       await storeSet('ln:import', LN_IMPORT_PATH, st);
