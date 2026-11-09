@@ -209,7 +209,6 @@ const MENUS = [
   { key: 'schedule', label: '면접 일정' },
   { key: 'resume', label: '이력서 검토·공고' },
   { key: 'templates', label: '양식 관리' },
-  { key: 'career', label: '승진·경력 관리' },
 ];
 const LEVELS = { none: 0, view: 1, edit: 2 };
 const ALL_EDIT = Object.fromEntries(MENUS.map(m => [m.key, 'edit']));
@@ -309,7 +308,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-29';
+const APP_VERSION = '2026.10.21-33';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -347,10 +346,6 @@ const PERMISSION_RULES = [
   R('GET',    /^\/api\/postings$/,               [['resume', 'view']]),
   R('GET',    /^\/api\/postings\/[^/]+$/,        [['resume', 'view']]),
   R('POST',   /^\/api\/postings$/,               [['resume', 'edit']]),
-  R('GET',    /^\/api\/career\/(employees|rules)$/, [['career', 'view']]),
-  R('POST',   /^\/api\/career\/(employees|import)$/, [['career', 'edit']]),
-  R('PUT',    /^\/api\/career\/(employees\/[^/]+|rules)$/, [['career', 'edit']]),
-  R('DELETE', /^\/api\/career\/employees\/[^/]+$/, [['career', 'edit']]),
   R('POST',   /^\/api\/postings\/import$/,        [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/import-results$/, [['resume', 'edit']]),
   R('POST',   /^\/api\/postings\/draft$/,        [['resume', 'edit']]),
@@ -381,6 +376,7 @@ const PERMISSION_RULES = [
   R('POST',   /^\/api\/criteria\/reset$/,         [['resume', 'edit']]),
   R('POST',   /^\/api\/screen-resume$/,           [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze$/,         [['resume', 'edit']]),
+  R('POST',   /^\/api\/resume\/read-applied$/,    [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze-multi$/,   [['resume', 'edit']]),
   R('GET',    /^\/api\/resume\/results$/,         [['resume', 'edit']]),
   R('GET',    /^\/api\/resume\/results-counts$/,  [['resume', 'edit']]),
@@ -1509,8 +1505,6 @@ app.post('/api/criteria/reset', ah(async (req, res) => {
 
 // ---------- 공고 (팀 → 포지션 → 근무 조건 → 공고문 → 확정) ----------
 const POSTINGS_PATH = path.join(DATA_DIR, 'postings.json');
-const EMPLOYEES_PATH = path.join(DATA_DIR, 'employees.json');
-const CAREER_RULES_PATH = path.join(DATA_DIR, 'career-rules.json');
 const POSTING_DEFAULTS_PATH = path.join(DATA_DIR, 'posting_defaults.json');
 // YYYY-MM-DD가 달력에 실제로 있는 날짜인지(13월·2월 30일·0일 등은 false). new Date(...).toISOString()은 Invalid Date에서 예외를 던지므로 먼저 걸러요.
 function isRealDate(d) {
@@ -1736,225 +1730,6 @@ app.get('/api/postings/stats', requireNotion, ah(async (req, res) => {
     const r = await notionApplicantStats(postings);
     res.json({ success: true, ...r });
   } catch (err) { sendNotionError(res, err); }
-}));
-
-// ---------- 승진·경력 관리 (직원 경력과 승진 검토) ----------
-// 계산 규칙은 직원 경력 엑셀(직원경력_승진관리_누적경력합산)과 같아요:
-//  인정 타사 경력(개월) = 직무 연관성 높음 × 70% + 낮음 × 20%
-//  누적 경력(년) = 당사 근속(입사일~오늘, 엑셀 YEARFRAC 실제/실제) + 인정 타사 경력 ÷ 12
-//  승진 검토 = 누적 경력 ≥ 다음 승진 기준(+ 설정에 따라 현 직급 최소 근속도). 부장 이상은 별도 심사.
-// 판단은 참고 정보이고 승진 결정은 인사 담당자가 해요. 직원 개인정보라 "승진·경력 관리" 권한이 있는 사람만 볼 수 있어요.
-// 엑셀 YEARFRAC(시작, 끝, 1) = 실제/실제 방식 (LibreOffice·Excel과 같은 값이 나오도록)
-function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
-function utc(y, m, d) { return Date.UTC(y, m - 1, d); }
-function parseYmd(s) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? { y: +m[1], m: +m[2], d: +m[3] } : null; }
-function yearFrac(aStr, bStr) {
-  let a = parseYmd(aStr), b = parseYmd(bStr); if (!a || !b) return null;
-  if (utc(a.y, a.m, a.d) > utc(b.y, b.m, b.d)) [a, b] = [b, a];
-  const days = Math.round((utc(b.y, b.m, b.d) - utc(a.y, a.m, a.d)) / 86400000);
-  if (days === 0) return 0;
-  // 1년 이내(시작일의 1년 뒤 날짜가 끝 날짜보다 늦거나 같음)
-  const oneYear = utc(a.y + 1, a.m, a.d <= 28 || a.m !== 2 ? a.d : (isLeap(a.y + 1) ? 29 : 28));
-  const withinYear = a.y === b.y || (b.y === a.y + 1 && (b.m < a.m || (b.m === a.m && b.d <= a.d)));
-  let yl;
-  if (withinYear) {
-    if (a.y === b.y) yl = isLeap(a.y) ? 366 : 365;
-    else {
-      // 걸친 두 해 중 2월 29일이 구간에 들어 있으면 366
-      const has29 = (isLeap(a.y) && utc(a.y, a.m, a.d) <= utc(a.y, 2, 29) && utc(b.y, b.m, b.d) >= utc(a.y, 2, 29)) || (isLeap(b.y) && utc(a.y, a.m, a.d) <= utc(b.y, 2, 29) && utc(b.y, b.m, b.d) >= utc(b.y, 2, 29));
-      yl = has29 ? 366 : 365;
-    }
-  } else {
-    let tot = 0; for (let y = a.y; y <= b.y; y++) tot += isLeap(y) ? 366 : 365;
-    yl = tot / (b.y - a.y + 1);
-  }
-  return days / yl;
-}
-
-const CAREER_LIMITS = { maxEmployees: 500, maxCareers: 30, name: 40, empNo: 20, eng: 40, place: 30, note: 300, careerCompany: 60, careerNote: 100, maxMonths: 600 };
-const CAREER_EMP_TYPES = ['정직원', '수습', '계약직', '기타'];
-const DEFAULT_PROMO_RULES = {
-  requireTenure: false,   // false(기본): 누적 경력만 비교 — 엑셀의 실제 판정 수식과 같아요. true: 현 직급 최소 근속도 함께 충족해야 승진 검토 대상(엑셀 사용방법 시트의 설명)
-  highRate: 70, lowRate: 20,   // 직무 연관성 높음·낮음 경력 인정률(%)
-  ranks: [
-    { rank: '사원', nextRank: '대리', nextYears: 4, minTenure: 4, note: '사원 → 대리' },
-    { rank: '대리', nextRank: '과장', nextYears: 7, minTenure: 3, note: '대리 → 과장' },
-    { rank: '과장', nextRank: '차장', nextYears: 11, minTenure: 4, note: '과장 → 차장' },
-    { rank: '차장', nextRank: '부장', nextYears: 15, minTenure: 4, note: '차장 → 부장' },
-    { rank: '부장', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사 기준 필요' },
-    { rank: '이사', nextRank: '', nextYears: null, minTenure: null, note: '능력에 따른 진급 / 별도 심사' },
-    { rank: '실장', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사' },
-    { rank: '대표이사', nextRank: '', nextYears: null, minTenure: null, note: '별도 심사' },
-  ],
-  // 입사 시 인정 직급(참고용): 인정 타사 경력 개월 기준
-  entryBands: [{ below: 48, rank: '사원' }, { below: 84, rank: '대리' }, { below: 132, rank: '과장' }, { below: 180, rank: '차장' }],
-  entryTop: '부장 검토',
-};
-// 승진 대상 직급이 없는 예전 저장값은 비고의 "사원 → 대리"에서 읽어요
-const withNextRank = r => ({ ...r, nextRank: typeof r.nextRank === 'string' ? r.nextRank : (((/→\s*([^\s/,]+)/.exec(String(r.note || '')) || [])[1]) || '') });
-async function loadPromoRules() {
-  const st = await storeGet('career-rules', CAREER_RULES_PATH, null);
-  if (!st || typeof st !== 'object') return JSON.parse(JSON.stringify(DEFAULT_PROMO_RULES));
-  const d = JSON.parse(JSON.stringify(DEFAULT_PROMO_RULES));
-  return { ...d, requireTenure: typeof st.requireTenure === 'boolean' ? st.requireTenure : d.requireTenure, highRate: Number.isFinite(st.highRate) ? st.highRate : d.highRate, lowRate: Number.isFinite(st.lowRate) ? st.lowRate : d.lowRate, ranks: (Array.isArray(st.ranks) && st.ranks.length ? st.ranks : d.ranks).map(withNextRank) };
-}
-async function loadEmployees() { const v = await storeGet('employees', EMPLOYEES_PATH, []); return Array.isArray(v) ? v : []; }
-async function saveEmployees(list) { return storeSet('employees', EMPLOYEES_PATH, list); }
-const careerToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
-const round2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
-// 직원 한 명의 계산값. careers: [{company, months, relevance:'high'|'low'}]
-function computeCareer(emp, rules, today) {
-  const t = today || careerToday();
-  const careers = Array.isArray(emp.careers) ? emp.careers : [];
-  const hi = careers.filter(c => c.relevance === 'high').reduce((n, c) => n + (Number(c.months) || 0), 0);
-  const lo = careers.filter(c => c.relevance !== 'high').reduce((n, c) => n + (Number(c.months) || 0), 0);
-  const recognized = round2(hi * (rules.highRate / 100) + lo * (rules.lowRate / 100));   // 인정 타사 경력(개월)
-  const tenure = emp.hireDate ? round2(yearFrac(emp.hireDate, t) ?? 0) : null;             // 당사 근속(년)
-  const total = tenure === null ? null : round2((yearFrac(emp.hireDate, t) ?? 0) + recognized / 12);   // 누적 경력(년): 엑셀과 같이 근속(반올림 전)과 인정 경력을 더한 뒤 한 번만 반올림해요
-  const appoint = emp.appointDate || emp.hireDate;
-  const rankTenure = appoint && appoint <= t ? round2(yearFrac(appoint, t) ?? 0) : null;   // 현 직급 근속(년)
-  let entryRank = '';
-  if (careers.length || recognized) { entryRank = rules.entryTop; for (const b of DEFAULT_PROMO_RULES.entryBands) if (recognized < b.below) { entryRank = b.rank; break; } }
-  const rule = (rules.ranks || []).find(r => r.rank === emp.rank);
-  const next = rule && rule.nextYears != null ? rule.nextYears : null, minTen = rule && rule.minTenure != null ? rule.minTenure : null;
-  let result, reason = '';
-  if (!emp.rank) { result = '직급 확인'; reason = '현재 직급이 비어 있어요.'; }
-  else if (rule && next === null) { result = '별도 심사'; reason = `${emp.rank}은(는) 승진 기준 표에 기간이 없어 별도 심사 대상이에요.`; }
-  else if (!rule) { result = '정보 확인 필요'; reason = `승진 기준 표에 "${emp.rank}" 직급이 없어요.`; }
-  else if (total === null || next === null) { result = '정보 확인 필요'; reason = '입사일이나 승진 기준이 없어요.'; }
-  else {
-    const okTotal = total >= next, okTenure = rankTenure !== null && minTen !== null ? rankTenure >= minTen : null;
-    const parts = [`누적 경력 ${total}년 / 기준 ${next}년 ${okTotal ? '충족' : '미달'}`];
-    if (minTen !== null) parts.push(`현 직급 근속 ${rankTenure === null ? '확인 불가' : rankTenure + '년'} / 최소 ${minTen}년 ${okTenure === null ? '확인 불가' : (okTenure ? '충족' : '미달')}`);
-    reason = parts.join(' · ');
-    if (rules.requireTenure && minTen !== null) result = okTotal && okTenure ? '승진 검토 대상' : (okTotal && okTenure === false ? '근속 부족' : '기준 미달');
-    else result = okTotal ? '승진 검토 대상' : '기준 미달';
-  }
-  return { highMonths: hi, lowMonths: lo, careerMonths: hi + lo, recognizedMonths: recognized, tenureYears: tenure, totalYears: total, rankTenureYears: rankTenure, entryRank, nextYears: next, minTenure: minTen, nextRank: (rule && next !== null && rule.nextRank) || '', result, reason };
-}
-const withCareer = (emp, rules, today) => ({ ...emp, calc: computeCareer(emp, rules, today) });
-
-
-// ---- 직원 입력 검증 ----
-const oneLineClean = (v, n) => String(v ?? '').replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
-function parseEmployeeInput(b, { rules, partial = false } = {}) {
-  const out = {}; const bad = m => ({ error: m });
-  const has = k => Object.prototype.hasOwnProperty.call(b, k) && b[k] !== undefined;
-  const need = !partial;
-  if (has('name') || need) { const v = oneLineClean(b.name, CAREER_LIMITS.name + 1); if (!v) return bad('직원 이름을 입력해주세요.'); if (v.length > CAREER_LIMITS.name) return bad(`이름은 ${CAREER_LIMITS.name}자 이내로 입력해주세요.`); out.name = v; }
-  if (has('empNo')) { const v = oneLineClean(b.empNo, CAREER_LIMITS.empNo + 1); if (v.length > CAREER_LIMITS.empNo) return bad(`사번은 ${CAREER_LIMITS.empNo}자 이내로 입력해주세요.`); out.empNo = v; }
-  if (has('engName')) { const v = oneLineClean(b.engName, CAREER_LIMITS.eng + 1); if (v.length > CAREER_LIMITS.eng) return bad(`영어 이름은 ${CAREER_LIMITS.eng}자 이내로 입력해주세요.`); out.engName = v; }
-  if (has('birthDate')) { const v = String(b.birthDate ?? '').trim(); if (v && !isRealDate(v)) return bad('생년월일 형식이 올바르지 않아요 (예: 1990-05-21).'); if (v && v > careerToday()) return bad('생년월일이 미래예요.'); out.birthDate = v; }
-  if (has('employmentType')) { const v = oneLineClean(b.employmentType, 10); if (v && !CAREER_EMP_TYPES.includes(v)) return bad(`고용형태는 ${CAREER_EMP_TYPES.join('·')} 중에서 골라주세요.`); out.employmentType = v; }
-  if (has('workplace')) { const v = oneLineClean(b.workplace, CAREER_LIMITS.place + 1); if (v.length > CAREER_LIMITS.place) return bad(`근무지는 ${CAREER_LIMITS.place}자 이내로 입력해주세요.`); out.workplace = v; }
-  if (has('hireDate') || need) { const v = String(b.hireDate ?? '').trim(); if (!v) return bad('입사일을 입력해주세요.'); if (!isRealDate(v)) return bad('입사일 형식이 올바르지 않아요 (예: 2022-03-01).'); if (v > careerToday()) return bad('입사일이 미래예요. 입사 예정자는 입사일 이후에 등록해주세요.'); out.hireDate = v; }
-  if (has('rank') || need) { const v = oneLineClean(b.rank, 20); const known = (rules.ranks || []).map(r => r.rank); if (!v) return bad('현재 직급을 골라주세요.'); if (!known.includes(v)) return bad(`직급은 승진 기준 표에 있는 직급(${known.join('·')})에서 골라주세요.`); out.rank = v; }
-  if (has('appointDate')) { const v = String(b.appointDate ?? '').trim(); if (v && !isRealDate(v)) return bad('현 직급 발령일 형식이 올바르지 않아요.'); if (v && v > careerToday()) return bad('현 직급 발령일이 미래예요.'); out.appointDate = v; }
-  if (has('note')) { const v = oneLineClean(b.note, CAREER_LIMITS.note + 1); if (v.length > CAREER_LIMITS.note) return bad(`비고는 ${CAREER_LIMITS.note}자 이내로 입력해주세요.`); out.note = v; }
-  if (has('careers')) {
-    if (!Array.isArray(b.careers)) return bad('타사 경력은 목록으로 보내주세요.');
-    if (b.careers.length > CAREER_LIMITS.maxCareers) return bad(`타사 경력은 ${CAREER_LIMITS.maxCareers}개까지 입력할 수 있어요.`);
-    const list = [];
-    for (const c of b.careers) {
-      if (!c || typeof c !== 'object' || Array.isArray(c)) return bad('타사 경력 항목 형식이 올바르지 않아요.');
-      const company = oneLineClean(c.company, CAREER_LIMITS.careerCompany + 1); if (company.length > CAREER_LIMITS.careerCompany) return bad(`회사 이름은 ${CAREER_LIMITS.careerCompany}자 이내로 입력해주세요.`);
-      const months = Number(c.months); if (!Number.isFinite(months) || !Number.isInteger(months) || months < 0 || months > CAREER_LIMITS.maxMonths) return bad(`"${company || '(회사 이름 없음)'}"의 경력은 0~${CAREER_LIMITS.maxMonths}개월 사이 정수로 입력해주세요.`);
-      const relevance = c.relevance === 'high' ? 'high' : 'low';
-      const note = oneLineClean(c.note, CAREER_LIMITS.careerNote + 1); if (note.length > CAREER_LIMITS.careerNote) return bad(`경력 메모는 ${CAREER_LIMITS.careerNote}자 이내로 입력해주세요.`);
-      list.push({ company, months, relevance, note });
-    }
-    out.careers = list;
-  }
-  return { value: out };
-}
-const careerSummary = (list, rules, today) => {
-  const calc = list.map(e => ({ e, c: computeCareer(e, rules, today) }));
-  const by = {}; calc.forEach(x => { by[x.c.result] = (by[x.c.result] || 0) + 1; });
-  return { total: list.length, byResult: by, byRank: list.reduce((m, e) => { m[e.rank] = (m[e.rank] || 0) + 1; return m; }, {}) };
-};
-app.get('/api/career/employees', ah(async (req, res) => {
-  const [list, rules] = await Promise.all([loadEmployees(), loadPromoRules()]);
-  const today = careerToday();
-  res.json({ success: true, today, rules, employees: list.map(e => withCareer(e, rules, today)), summary: careerSummary(list, rules, today) });
-}));
-app.post('/api/career/employees', ah(async (req, res) => {
-  const rules = await loadPromoRules();
-  const parsed = parseEmployeeInput(req.body || {}, { rules });
-  if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const v = parsed.value; const list = [...(await loadEmployees())];
-  if (list.length >= CAREER_LIMITS.maxEmployees) return res.status(400).json({ error: `직원은 최대 ${CAREER_LIMITS.maxEmployees}명까지 등록할 수 있어요.` });
-  if (v.empNo && list.some(x => x.empNo && x.empNo === v.empNo)) return res.status(409).json({ error: `사번 ${v.empNo}은(는) 이미 등록돼 있어요.` });
-  const now = new Date().toISOString();
-  const rec = { id: 'emp_' + crypto.randomBytes(5).toString('hex'), name: v.name, empNo: v.empNo || '', engName: v.engName || '', birthDate: v.birthDate || '', employmentType: v.employmentType || '정직원', workplace: v.workplace || '', hireDate: v.hireDate, rank: v.rank, appointDate: v.appointDate || '', careers: v.careers || [], note: v.note || '', createdAt: now, updatedAt: now };
-  list.push(rec); await saveEmployees(list);
-  res.json({ success: true, employee: withCareer(rec, rules) });
-}));
-app.put('/api/career/employees/:id', ah(async (req, res) => {
-  const rules = await loadPromoRules(); const list = [...(await loadEmployees())];
-  const i = list.findIndex(x => x.id === req.params.id);
-  if (i < 0) return res.status(404).json({ error: '직원을 찾을 수 없어요. 새로고침한 뒤 다시 시도해주세요.' });
-  const parsed = parseEmployeeInput(req.body || {}, { rules, partial: true });
-  if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const v = parsed.value;
-  if (v.empNo && list.some((x, j) => j !== i && x.empNo && x.empNo === v.empNo)) return res.status(409).json({ error: `사번 ${v.empNo}은(는) 다른 직원이 쓰고 있어요.` });
-  const next = { ...list[i], ...v, updatedAt: new Date().toISOString() };
-  list[i] = next; await saveEmployees(list);
-  res.json({ success: true, employee: withCareer(next, rules) });
-}));
-// 퇴사자 삭제: 이름을 한 번 더 입력해야 지워요(서버에서도 확인). 지우면 되돌릴 수 없어요.
-app.delete('/api/career/employees/:id', ah(async (req, res) => {
-  const list = [...(await loadEmployees())];
-  const i = list.findIndex(x => x.id === req.params.id);
-  if (i < 0) return res.status(404).json({ error: '직원을 찾을 수 없어요. 이미 삭제됐거나 새로고침이 필요해요.' });
-  const confirmName = String((req.body && req.body.confirmName) || (req.query && req.query.confirmName) || '').trim();
-  if (confirmName !== list[i].name) return res.status(400).json({ error: '삭제할 직원의 이름을 정확히 입력해야 삭제돼요.' });
-  const [gone] = list.splice(i, 1); await saveEmployees(list);
-  console.log(`[career] 직원 삭제: ${gone.id}`);   // 로그에는 이름을 남기지 않아요
-  res.json({ success: true, deletedId: gone.id, remaining: list.length });
-}));
-app.get('/api/career/rules', ah(async (req, res) => res.json({ success: true, rules: await loadPromoRules(), defaults: DEFAULT_PROMO_RULES })));
-app.put('/api/career/rules', ah(async (req, res) => {
-  const b = req.body || {}; const cur = await loadPromoRules(); const next = { ...cur };
-  if (b.requireTenure !== undefined) { if (typeof b.requireTenure !== 'boolean') return res.status(400).json({ error: '판정 방식은 켬/끔 중에서 골라주세요.' }); next.requireTenure = b.requireTenure; }
-  for (const [k, label] of [['highRate', '연관성 높음 인정률'], ['lowRate', '연관성 낮음 인정률']]) if (b[k] !== undefined) { const n = Number(b[k]); if (!Number.isFinite(n) || n < 0 || n > 100) return res.status(400).json({ error: `${label}은 0~100 사이로 입력해주세요.` }); next[k] = n; }
-  if (b.ranks !== undefined) {
-    if (!Array.isArray(b.ranks) || !b.ranks.length || b.ranks.length > 20) return res.status(400).json({ error: '직급 기준은 1~20개로 입력해주세요.' });
-    const seen = new Set(); const ranks = [];
-    for (const r of b.ranks) {
-      const name = oneLineClean(r && r.rank, 20); if (!name) return res.status(400).json({ error: '직급 이름이 비어 있어요.' }); if (seen.has(name)) return res.status(400).json({ error: `직급 "${name}"이(가) 두 번 있어요.` }); seen.add(name);
-      const nums = {}; for (const [k, label] of [['nextYears', '다음 승진 기준 누적 경력'], ['minTenure', '현 직급 최소 근속']]) { const raw = r[k]; if (raw === null || raw === undefined || raw === '') nums[k] = null; else { const n = Number(raw); if (!Number.isFinite(n) || n < 0 || n > 60) return res.status(400).json({ error: `"${name}"의 ${label}은 0~60년 사이로 입력해주세요.` }); nums[k] = n; } }
-      ranks.push({ rank: name, nextRank: oneLineClean(r.nextRank, 20), nextYears: nums.nextYears, minTenure: nums.minTenure, note: oneLineClean(r.note, 60) });
-    }
-    const badTarget = ranks.find(r => r.nextRank && (!seen.has(r.nextRank) || r.nextRank === r.rank));
-    if (badTarget) return res.status(400).json({ error: `"${badTarget.rank}"의 승진 대상 직급은 기준 표에 있는 다른 직급이어야 해요.` });
-    const used = (await loadEmployees()).map(e => e.rank).filter(x => !seen.has(x));
-    if (used.length) return res.status(400).json({ error: `현재 직원이 쓰고 있는 직급(${[...new Set(used)].join('·')})은 지울 수 없어요. 먼저 그 직원의 직급을 바꿔주세요.` });
-    next.ranks = ranks;
-  }
-  await storeSet('career-rules', CAREER_RULES_PATH, next);
-  res.json({ success: true, rules: next });
-}));
-// 파일로 직원 가져오기: 같은 사번이 있으면 건너뛰어요(덮어쓰지 않아요). 일부가 잘못돼도 나머지는 등록해요.
-app.post('/api/career/import', ah(async (req, res) => {
-  const items = req.body && req.body.employees;
-  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: '가져올 직원이 없어요. 이 앱에서 쓰는 직원 파일(JSON)인지 확인해주세요.' });
-  if (items.length > CAREER_LIMITS.maxEmployees) return res.status(400).json({ error: `한 번에 ${CAREER_LIMITS.maxEmployees}명까지 가져올 수 있어요.` });
-  const rules = await loadPromoRules(); const list = [...(await loadEmployees())]; const out = []; let created = 0;
-  for (const it of items) {
-    const nm = it && typeof it === 'object' ? oneLineClean(it.name, 40) : '';
-    if (!it || typeof it !== 'object' || Array.isArray(it)) { out.push({ name: nm, result: 'failed', error: '형식이 올바르지 않아요.' }); continue; }
-    const parsed = parseEmployeeInput(it, { rules });
-    if (parsed.error) { out.push({ name: nm, result: 'failed', error: parsed.error }); continue; }
-    const v = parsed.value;
-    if (v.empNo && list.some(x => x.empNo && x.empNo === v.empNo)) { out.push({ name: v.name, result: 'skipped', error: `사번 ${v.empNo}이(가) 이미 있어서 건너뛰었어요.` }); continue; }
-    if (!v.empNo && list.some(x => x.name === v.name && x.hireDate === v.hireDate)) { out.push({ name: v.name, result: 'skipped', error: '같은 이름·입사일의 직원이 이미 있어서 건너뛰었어요.' }); continue; }
-    if (list.length >= CAREER_LIMITS.maxEmployees) { out.push({ name: v.name, result: 'failed', error: `직원은 최대 ${CAREER_LIMITS.maxEmployees}명까지 등록할 수 있어요.` }); continue; }
-    const now = new Date().toISOString();
-    list.push({ id: 'emp_' + crypto.randomBytes(5).toString('hex'), name: v.name, empNo: v.empNo || '', engName: v.engName || '', birthDate: v.birthDate || '', employmentType: v.employmentType || '정직원', workplace: v.workplace || '', hireDate: v.hireDate, rank: v.rank, appointDate: v.appointDate || '', careers: v.careers || [], note: v.note || '', createdAt: now, updatedAt: now });
-    created++; out.push({ name: v.name, result: 'created' });
-  }
-  if (created) await saveEmployees(list);
-  res.json({ success: true, created, skipped: out.filter(x => x.result === 'skipped').length, failed: out.filter(x => x.result === 'failed').length, results: out });
 }));
 
 // ---------- 파일로 공고 가져오기 ----------
@@ -4208,6 +3983,25 @@ function takePdf(req, res) {
   }
   return buf;
 }
+
+// 이력서에 적힌 "지원분야"만 읽어요(어느 공고에 낸 이력서인지 사람이 고를 때 참고하는 값이에요).
+// 사람인 이력서 첫 쪽의 "지원분야 : … 입사지원일 : …" 줄만 읽고, AI를 부르지 않아요. 이름·연락처 등 다른 내용은 읽어도 돌려주거나 저장하지 않아요.
+// 읽지 못하면(스캔본·잡코리아 형식 등 지원분야 줄이 없는 파일) 오류가 아니라 appliedFor가 빈 값이에요.
+const APPLIED_RE = /(?:지원\s*분야|지원\s*공고|지원\s*직무|지원\s*포지션)\s*[:：]\s*([^\n]*?)\s*(?:입사\s*지원일|\n|$)/;
+async function readAppliedFor(buf) {
+  let pdfParse; try { pdfParse = require('pdf-parse/lib/pdf-parse.js'); } catch { return ''; }   // 기본 진입점은 자체 시험 파일을 읽으려는 문제가 있어 lib을 바로 불러요
+  const parsed = await withTimeout(pdfParse(buf, { max: 1 }), 5000, 'PDF 읽기');
+  const text = String((parsed && parsed.text) || '').replace(/\u0000/g, ':').replace(/[\u00a0\u3000]/g, ' ').replace(/[ \t]+/g, ' ');   // PDF에 따라 콜론이 널 문자로 읽혀요
+  const m = APPLIED_RE.exec(text);
+  return m ? m[1].replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+}
+app.post('/api/resume/read-applied', pdfBody, ah(async (req, res) => {
+  const buf = takePdf(req, res);
+  if (!buf) return;
+  let appliedFor = '';
+  try { appliedFor = await readAppliedFor(buf); } catch { appliedFor = ''; }   // 깨진 PDF·시간 초과도 "못 읽음"으로 돌려요
+  res.json({ success: true, appliedFor });
+}));
 
 app.post('/api/resume/analyze', pdfBody, ah(async (req, res) => {
   const buf = takePdf(req, res);
