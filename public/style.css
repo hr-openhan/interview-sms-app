@@ -464,16 +464,7 @@ body {
   margin-bottom: 20px;
 }
 
-.sch-calendar-btn {
-  padding: 7px 13px;
-  border-radius: 7px;
-  border: 1px solid #4285f4;
-  background: var(--panel);
-  color: #4285f4;
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-}
+/* (구글캘린더 버튼은 아래 "일정 카드 버튼 통일" 규칙을 따라요) */
 
 .sch-edit-btn,
 .sch-save-btn,
@@ -2153,3 +2144,18 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 /* 칸반 접힌 열 */
 .ap-kb-collapsed:not(.open) { opacity: .85; }
 .ap-kb-collapsed h3 .link-btn { font-size: 12px; margin-left: 6px; }
+
+/* 공고 만들기는 정비 전이라 숨김(서버 환경변수 SHOW_POSTING_CREATE=1 이면 켜져요). 코드·서버 기능·저장된 공고는 그대로예요 */
+.no-posting-create .sub-btn[data-sub="posting"], .no-posting-create .eval-go-posting, .no-posting-create #postingView { display: none !important; }
+
+/* 일정 카드 버튼 통일: 오랩 일정에 추가 · 구글캘린더 · 면접 질문 추천 · 수정 · 저장 · 취소 · 삭제가 같은 크기·모양이에요(뜻은 색으로만 구분: 저장=강조색, 삭제=빨간 글자) */
+.tpl-card-actions .sch-orab-btn, .tpl-card-actions .sch-calendar-btn, .tpl-card-actions .sch-iq-btn,
+.tpl-card-actions .sch-edit-btn, .tpl-card-actions .sch-save-btn, .tpl-card-actions .sch-cancel-btn, .tpl-card-actions .sch-delete-btn {
+  box-sizing: border-box; min-height: 34px; padding: 7px 13px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+  font-size: 13px; font-family: inherit; font-weight: 500; line-height: 1.2; white-space: nowrap; cursor: pointer; text-decoration: none;
+}
+.tpl-card-actions .sch-orab-btn:hover, .tpl-card-actions .sch-calendar-btn:hover, .tpl-card-actions .sch-iq-btn:hover,
+.tpl-card-actions .sch-edit-btn:hover, .tpl-card-actions .sch-cancel-btn:hover { background: #efe9dc; }
+.tpl-card-actions .sch-save-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tpl-card-actions .sch-delete-btn { color: var(--danger); }
+.tpl-card-actions .sch-delete-btn:hover { background: #f8e9e7; }

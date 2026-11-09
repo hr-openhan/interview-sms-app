@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-36';
+const APP_VERSION = '2026.10.21-38';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -92,7 +92,7 @@ function showToast(message) {
 
 // 지금 로그인한 사람과 메뉴별 권한 (/api/me 결과로 채워짐. 로그인 기능이 꺼진 서버에서는 모두 '수정')
 const PERM_LEVEL = { none: 0, view: 1, edit: 2 };
-let ME = { mode: 'none', authed: true, role: 'full', perms: { send: 'edit', history: 'edit', schedule: 'edit', resume: 'edit', interviews: 'edit', templates: 'edit' } };
+let ME = { mode: 'none', authed: true, role: 'full', features: { postingCreate: false }, perms: { send: 'edit', history: 'edit', schedule: 'edit', resume: 'edit', interviews: 'edit', templates: 'edit' } };
 // 면접 관리(interviews)는 예전에 "이력서 검토·공고(resume)" 권한으로 보던 화면이라, 그 권한이 있는 사용자도 그대로 보고 고칠 수 있어요(팀장은 interviews 보기만 있어서 읽기 전용이에요)
 const permOf = (menu) => Math.max(PERM_LEVEL[ME.perms[menu]] || 0, menu === 'interviews' ? (PERM_LEVEL[ME.perms.resume] || 0) : 0);
 function canView(menu) { return permOf(menu) >= 1; }
@@ -729,6 +729,7 @@ sendBtn.addEventListener('click', () => handleSend());
 // ---------- 탭 전환 ----------
 function showTab(tab) {
   if (typeof interviewDirty === 'function' && interviewDirty() && tab !== 'interview' && !confirm('면접 관리에 보내지 않은 답변이 있어요. 다른 탭으로 가도 작성한 답변은 이 화면에 남지만, 새로고침하거나 지원자를 바꾸면 사라져요.\n\n그래도 이동할까요?')) return;
+  if (tab === 'posting' && !postingCreateOn()) tab = 'resume';   // 공고 만들기는 정비 전이라 숨겨져 있어요(켜는 법: 서버 환경변수 SHOW_POSTING_CREATE=1)
   if (tab === 'resume' || tab === 'posting') lastManageTab = tab;   // 공고 관리를 다시 누르면 직전에 보던 화면을 열어요
   tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.dataset.group === 'manage' && (tab === 'resume' || tab === 'posting'))));
   document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === tab));
@@ -4059,7 +4060,10 @@ function renderLeadNote() {
   el.hidden = !lead;
   if (lead) el.textContent = `${(ME.teams || []).join('·')} 면접 기록만 보여요(보기 전용). 다른 팀과 수정·문자 발송은 소유주에게 요청해주세요.`;
 }
+// 공고 만들기 화면을 보여줄지(서버 환경변수 SHOW_POSTING_CREATE=1 일 때만). 숨겨도 코드와 저장된 공고는 그대로예요
+function postingCreateOn() { return !!(ME.features && ME.features.postingCreate); }
 function applyPermissions() {
+  document.body.classList.toggle('no-posting-create', !postingCreateOn());
   renderLeadNote();
   MENU_KEYS.forEach(m => {
     document.body.classList.toggle('no-view-' + m, !canView(m));
