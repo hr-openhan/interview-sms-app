@@ -341,7 +341,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-38';
+const APP_VERSION = '2026.10.21-39';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -409,6 +409,7 @@ const PERMISSION_RULES = [
   R('POST',   /^\/api\/criteria\/reset$/,         [['resume', 'edit']]),
   R('POST',   /^\/api\/screen-resume$/,           [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze$/,         [['resume', 'edit']]),
+  R('POST',   /^\/api\/postings\/from-link$/,       [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/read-applied$/,    [['resume', 'edit']]),
   R('POST',   /^\/api\/resume\/analyze-multi$/,   [['resume', 'edit']]),
   R('GET',    /^\/api\/resume\/results$/,         [['resume', 'edit']]),
@@ -2846,6 +2847,159 @@ function splitCareerSuggestion(text) {
   const career = m[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').replace(/\[(?:입력|추천)\]/g, '').trim().slice(0, POSTING_LIMITS.career);
   return { career, body: lines.slice(k + 1).join('\n').trim() };
 }
+// ---------- 공고 링크(사람인·잡코리아)로 공고 올리기 ----------
+// 링크를 붙여넣으면 서버가 그 페이지의 글을 읽어 이 앱의 공고문 형식으로 정리해서 확정 공고로 저장해요(이력서 점수의 기준 공고로 바로 쓸 수 있어요).
+// 읽지 못하면(사이트가 막은 경우 등) 공고 글을 직접 붙여넣어 같은 정리를 거치게 해요. AI를 부르지 않고 규칙으로만 정리해요(API 키가 없어도 돼요).
+const LINK_SITES = [{ name: '사람인', hosts: ['saramin.co.kr'] }, { name: '잡코리아', hosts: ['jobkorea.co.kr'] }];
+const LINK_TEST_HOSTS = String(process.env.POSTING_LINK_TEST_HOSTS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);   // 시험 전용(운영에서는 비워 둬요)
+const LINK_MAX_BYTES = 2 * 1024 * 1024, LINK_TIMEOUT_MS = 8000;
+function isPrivateAddr(ip) {
+  const v = String(ip || '');
+  if (/^(::1|::|fc|fd|fe80)/i.test(v)) return true;
+  const m = v.replace(/^::ffff:/i, '').match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/); if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+}
+// 허용되는 공고 주소인지: { site, url } 또는 { error }. 호스트는 saramin.co.kr·jobkorea.co.kr(와 하위 도메인)만 받아요.
+function checkPostingLink(raw) {
+  let u; try { u = new URL(String(raw || '').trim()); } catch { return { error: '주소 형식이 올바르지 않아요. 사람인·잡코리아 공고 주소를 그대로 붙여넣어 주세요.' }; }
+  const testHost = LINK_TEST_HOSTS.includes(u.host.toLowerCase());
+  if (u.protocol !== 'https:' && !(testHost && u.protocol === 'http:')) return { error: 'https:// 로 시작하는 주소만 읽어요.' };
+  if (u.username || u.password) return { error: '아이디·비밀번호가 들어간 주소는 읽지 않아요.' };
+  const host = u.hostname.toLowerCase();
+  if (testHost) return { site: '시험', url: u.toString(), test: true };
+  if (u.port && u.port !== '443') return { error: '사람인·잡코리아 공고 주소만 읽어요.' };
+  const site = LINK_SITES.find(s => s.hosts.some(h => host === h || host.endsWith('.' + h)));
+  if (!site) return { error: '사람인(saramin.co.kr)·잡코리아(jobkorea.co.kr) 공고 주소만 읽어요. 다른 사이트는 공고 글을 직접 붙여넣어 주세요.' };
+  return { site: site.name, url: u.toString() };
+}
+function decodeHtmlBytes(buf, contentType) {
+  let cs = (String(contentType || '').match(/charset=([\w-]+)/i) || [])[1];
+  if (!cs) cs = (buf.slice(0, 4096).toString('latin1').match(/<meta[^>]+charset=["']?([\w-]+)/i) || [])[1];
+  cs = String(cs || 'utf-8').toLowerCase();
+  try { return new TextDecoder(cs === 'ks_c_5601-1987' ? 'euc-kr' : cs).decode(buf); } catch { return buf.toString('utf8'); }
+}
+// 한 번 가져오기: 리다이렉트는 허용 사이트로만, 사설 주소로 연결되면 거절, 시간·크기·형식 제한
+async function fetchPostingPage(startUrl, depth = 0) {
+  const chk = checkPostingLink(startUrl); if (chk.error) { const e = new Error(chk.error); e.userFacing = true; throw e; }
+  const u = new URL(chk.url);
+  if (!chk.test) {   // 이름 → 주소를 먼저 확인해서 사설망으로 가는 주소는 막아요
+    let addrs = [];
+    try { addrs = await linkDnsLookup(u.hostname); } catch { const e = new Error('주소를 찾지 못했어요.'); e.userFacing = true; throw e; }
+    if (!addrs.length || addrs.some(a => isPrivateAddr(a.address))) { const e = new Error('이 주소는 읽을 수 없어요.'); e.userFacing = true; throw e; }
+  }
+  let r;
+  try {
+    r = await axios.get(chk.url, { responseType: 'arraybuffer', timeout: LINK_TIMEOUT_MS, maxContentLength: LINK_MAX_BYTES, maxBodyLength: LINK_MAX_BYTES, maxRedirects: 0, validateStatus: () => true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HiringHelper/1.0)', 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'ko-KR,ko;q=0.9' } });
+  } catch (err) { const e = new Error(/maxContentLength|exceeded/i.test(err.message) ? '페이지가 너무 커서 읽지 않았어요(2MB 초과).' : /timeout/i.test(err.message) ? '페이지를 불러오는 데 시간이 너무 오래 걸렸어요.' : '페이지를 불러오지 못했어요.'); e.userFacing = true; throw e; }
+  if ([301, 302, 303, 307, 308].includes(r.status) && r.headers.location) {
+    if (depth >= 3) { const e = new Error('주소가 너무 여러 번 다른 곳으로 넘어가요.'); e.userFacing = true; throw e; }
+    return fetchPostingPage(new URL(r.headers.location, chk.url).toString(), depth + 1);   // 넘어간 곳도 같은 검사를 다시 거쳐요(허용 사이트만)
+  }
+  if (r.status >= 400) { const e = new Error(r.status === 403 || r.status === 429 ? '사이트가 자동 읽기를 막은 것 같아요.' : `페이지를 읽지 못했어요(오류 ${r.status}).`); e.userFacing = true; e.blocked = r.status === 403 || r.status === 429; throw e; }
+  if (!/html|text\/plain/i.test(String(r.headers['content-type'] || ''))) { const e = new Error('웹 페이지(HTML)가 아니라서 읽지 않았어요.'); e.userFacing = true; throw e; }
+  return { html: decodeHtmlBytes(Buffer.from(r.data), r.headers['content-type']), url: chk.url, site: chk.site };
+}
+// 이름 → 주소 확인(진짜 DNS). 시험에서만 환경변수 POSTING_LINK_TEST_DNS="이름=주소,이름=주소"로 일부 이름의 결과를 정해 줄 수 있어요(운영에서는 비워 둬요).
+const LINK_TEST_DNS = Object.fromEntries(String(process.env.POSTING_LINK_TEST_DNS || '').split(',').map(x => x.trim().split('=')).filter(x => x.length === 2));
+async function linkDnsLookup(host) {
+  if (Object.prototype.hasOwnProperty.call(LINK_TEST_DNS, host)) return [{ address: LINK_TEST_DNS[host], family: 4 }];
+  return require('node:dns').promises.lookup(host, { all: true });
+}
+const decodeEntities = t => String(t).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(Number(n)); } catch { return ''; } });
+function htmlToLines(html) {
+  const body = String(html || '').replace(/<(script|style|noscript|svg|iframe|head)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(br|\/p|\/div|\/li|\/tr|\/h[1-6]|\/table|\/section|\/dd|\/dt)\b[^>]*>/gi, '\n').replace(/<li\b[^>]*>/gi, '\n- ').replace(/<[^>]+>/g, ' ');
+  return decodeEntities(body).split('\n').map(l => l.replace(/[\u0000-\u001f\u00a0\u3000]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+function metaOf(html) {
+  const pick = re => { const m = String(html).match(re); return m ? decodeEntities(m[1]).replace(/\s+/g, ' ').trim() : ''; };
+  let title = pick(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i) || pick(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:title["']/i) || pick(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  title = title.replace(/\s*[-|·]\s*(사람인|잡코리아|Saramin|JobKorea)\s*$/i, '').replace(/^\s*\[[^\]]{1,30}\]\s*(?=[^\[\]]{2,})/, m => m).trim();
+  return { title: title.slice(0, 100) };
+}
+const SECTION_RULES = [
+  { key: 'work', title: '이런 일을 함께해요', re: /^(?:[\[■◆●▶▷·\-\s]*)(주요\s*업무|담당\s*업무|하는\s*일|업무\s*내용|직무\s*내용|업무\s*소개|Responsibilities)(?![가-힣A-Za-z0-9])/i },
+  { key: 'need', title: '이런 분이었으면 좋겠어요', re: /^(?:[\[■◆●▶▷·\-\s]*)(자격\s*요건|지원\s*자격|필수\s*(?:요건|사항|자격)|Requirements|Qualifications)(?![가-힣A-Za-z0-9])/i },
+  { key: 'pref', title: '이런 경험이 있다면 더 좋아요', re: /^(?:[\[■◆●▶▷·\-\s]*)(우대\s*(?:사항|조건|요건)?|Preferred|Nice to have)(?![가-힣A-Za-z0-9])/i },
+  { key: 'cond', title: '■ 근무 조건 및 전형 안내', re: /^(?:[\[■◆●▶▷·\-\s]*)(근무\s*(?:조건|형태|지|시간)|전형\s*(?:절차|과정)|접수\s*(?:기간|방법)|복리\s*후생|복지|급여|채용\s*절차|제출\s*서류)(?![가-힣A-Za-z0-9])/i },
+];
+const bulletize = lines => lines.map(l => l.replace(/^[-•·▶▷■◆●]\s*/, '').trim()).filter(l => l.length >= 2 && l.length <= 200).map(l => '- ' + l);
+// 읽어 온 글(줄 목록)을 이 앱의 공고문 형식(머리글 아래 - 목록)으로 정리해요. 머리글을 못 찾으면 전체를 "이런 분이었으면 좋겠어요" 아래에 둬서 점수 AI가 전체 글을 보게 해요.
+function arrangeJdText(lines) {
+  const sec = { work: [], need: [], pref: [], cond: [] }; let cur = null; let found = 0; const loose = [];
+  for (const raw of lines) {
+    const rule = SECTION_RULES.find(r => r.re.test(raw) && raw.length <= 40);
+    if (rule) { cur = rule.key; found++; const rest = raw.replace(rule.re, '').replace(/^[\]\s:：\-]+/, '').trim(); if (rest) sec[cur].push(rest); continue; }
+    if (cur) sec[cur].push(raw); else loose.push(raw);
+  }
+  if (!found) { sec.need = loose.slice(0, 80); loose.length = 0; }
+  const parts = [];
+  for (const r of SECTION_RULES) { const b = bulletize(sec[r.key]).slice(0, r.key === 'cond' ? 30 : 25); if (b.length) parts.push(r.title + '\n' + b.join('\n')); }
+  return { text: parts.join('\n\n'), sections: found, usedAll: !found };
+}
+const KDATE = /(20\d{2})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/;
+function kdate(s) { const m = String(s || '').match(KDATE); if (!m) return ''; const d = `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`; return isRealDate(d) ? d : ''; }
+function metaFromLines(lines) {
+  const joined = lines.join('\n'); const out = { postedAt: '', applyStart: '', applyEnd: '', career: '', education: '' };
+  const pa = joined.match(/(?:등록일|게시일|공고일|작성일)\s*[:：]?\s*([^\n]{0,24})/); if (pa) out.postedAt = kdate(pa[1]);
+  const ap = joined.match(/(?:접수\s*기간|모집\s*기간|지원\s*기간|마감일|마감)\s*[:：]?\s*([^\n]{0,60})/);
+  if (ap) { const ds = [...ap[1].matchAll(new RegExp(KDATE.source, 'g'))].map(m => kdate(m[0])).filter(Boolean); if (ds.length >= 2) { out.applyStart = ds[0]; out.applyEnd = ds[1]; } else if (ds.length === 1) { out.applyEnd = ds[0]; } }
+  const cm = joined.match(/(?:^|\n)\s*경력\s*[:：]?\s*(신입[^\n]{0,20}|경력무관[^\n]{0,20}|경력\s*\d+년[^\n]{0,16}|\d+년[^\n]{0,16})/); if (cm) out.career = cm[1].trim().slice(0, 40);
+  const em = joined.match(/(?:^|\n)\s*학력\s*[:：]?\s*(학력무관|고졸[^\n]{0,12}|초대졸[^\n]{0,12}|대졸[^\n]{0,12}|석사[^\n]{0,12}|박사[^\n]{0,12})/); if (em) out.education = em[1].trim().slice(0, 40);
+  if (out.applyStart && out.applyEnd && out.applyEnd < out.applyStart) { out.applyStart = ''; out.applyEnd = ''; }
+  return out;
+}
+// 사람인·잡코리아는 공고 본문을 별도 프레임에 담는 경우가 있어서, 아는 형태의 본문 주소도 함께 시도해요(못 가져오면 무시해요)
+function extraBodyUrls(urlStr) {
+  try {
+    const u = new URL(urlStr); const out = [];
+    if (/saramin\.co\.kr$/i.test(u.hostname) && u.searchParams.get('rec_idx')) out.push(`https://www.saramin.co.kr/zf_user/jobs/relay/view-detail?rec_idx=${encodeURIComponent(u.searchParams.get('rec_idx'))}`);
+    const jk = u.pathname.match(/\/Recruit\/GI_Read\/(\d+)/i); if (/jobkorea\.co\.kr$/i.test(u.hostname) && jk) out.push(`https://www.jobkorea.co.kr/Recruit/GI_Read_Comt_Ifrm?Gno=${jk[1]}`);
+    return out;
+  } catch { return []; }
+}
+app.post('/api/postings/from-link', ah(async (req, res) => {
+  const b = req.body || {};
+  const team = String(b.team || '').trim();
+  if (!TEAM_LIST.includes(team)) return res.status(400).json({ error: '팀을 선택해주세요(팀은 면접 일정의 팀 목록이에요).' });
+  const chk = checkPostingLink(b.url); if (chk.error) return res.status(400).json({ error: chk.error });
+  const existing = (await loadPostings()).find(p => (p.channels || []).some(c => c.url === chk.url));
+  if (existing) return res.status(409).json({ error: '이미 올린 공고예요. 평가할 공고에서 그 공고를 고르세요.', existingId: existing.id, duplicate: true });
+  let lines = [], title = '', fetched = false, fetchNote = '';
+  const pasted = typeof b.text === 'string' ? b.text.trim() : '';
+  if (pasted) { if (pasted.length > 40000) return res.status(400).json({ error: '붙여넣은 글이 너무 길어요(4만 자 이내).' }); lines = pasted.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean); title = String(b.position || '').trim(); }
+  else {
+    try {
+      const page = await fetchPostingPage(chk.url); fetched = true;
+      title = metaOf(page.html).title; lines = htmlToLines(page.html);
+      for (const extra of extraBodyUrls(page.url)) { try { const ex = await fetchPostingPage(extra); lines = lines.concat(htmlToLines(ex.html)); } catch { /* 본문 프레임을 못 가져와도 계속해요 */ } }
+    } catch (err) {
+      const msg = err.userFacing ? err.message : '페이지를 읽는 중 오류가 났어요.';
+      return res.status(422).json({ error: `${msg} 공고 글을 직접 복사해서 아래 칸에 붙여넣어 주세요.`, needPaste: true });
+    }
+  }
+  const text = lines.join('\n');
+  if (text.length < 120) return res.status(422).json({ error: pasted ? '붙여넣은 글이 너무 짧아요(120자 이상 필요해요).' : '페이지에서 공고 글을 거의 읽지 못했어요(로그인이 필요하거나 사이트가 막았을 수 있어요). 공고 글을 직접 복사해서 붙여넣어 주세요.', needPaste: true });
+  const position = String(b.position || '').replace(/\s+/g, ' ').trim() || title;
+  if (!position) return res.status(422).json({ error: '공고 제목을 읽지 못했어요. 포지션 이름을 입력해주세요.', needPosition: true, needPaste: !fetched });
+  const arranged = arrangeJdText(lines); const meta = metaFromLines(lines);
+  const bodyJd = arranged.text.slice(0, POSTING_LIMITS.jd);
+  const parsed = parsePostingInput({ team, position: position.slice(0, POSTING_LIMITS.position), career: meta.career, education: meta.education, employmentType: '', jd: bodyJd, status: 'confirmed',
+    applyStart: meta.applyStart && meta.applyEnd ? meta.applyStart : '', applyEnd: meta.applyStart && meta.applyEnd ? meta.applyEnd : '',
+    channels: [{ name: chk.site === '시험' ? '사람인' : chk.site, url: chk.url, postedAt: meta.postedAt }] }, { create: true, teamBrands: await loadTeamBrands() });
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  if (String(parsed.value.jd || '').trim().length < POSTING_LIMITS.minConfirmJd) return res.status(422).json({ error: '공고 글에서 쓸 만한 내용을 찾지 못했어요. 공고 글을 직접 붙여넣어 주세요.', needPaste: true });
+  const list = [...(await loadPostings())];
+  if (list.length >= POSTING_LIMITS.max) return res.status(400).json({ error: `공고는 최대 ${POSTING_LIMITS.max}개까지 저장할 수 있어요. 오래된 공고를 삭제해주세요.` });
+  const v = parsed.value; const now = new Date().toISOString();
+  const rec = { id: 'pst_' + crypto.randomBytes(5).toString('hex'), team: v.team, position: v.position, brand: '', career: v.career || '', education: v.education || '', workplace: '', employmentType: '', months: null,
+    applyStart: v.applyStart || '', applyEnd: v.applyEnd || '', profile: /신입/.test(v.career || '') && !/경력/.test(v.career || '') ? '신입직' : '경력직', jd: v.jd, channels: v.channels || [], closedAt: '', status: 'confirmed', source: 'link', createdAt: now, updatedAt: now };
+  list.push(rec); await savePostings(list);
+  res.json({ success: true, posting: rec, note: { sections: arranged.sections, usedAll: arranged.usedAll, postedAt: meta.postedAt, fetched } });
+}));
+
 app.post('/api/postings/draft', ah(async (req, res) => {
   if (!anthropic) return res.status(500).json({ error: '서버에 ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다. 공고문은 직접 작성하셔도 돼요.' });
   const b = req.body || {};
