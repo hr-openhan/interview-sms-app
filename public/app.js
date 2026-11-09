@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-33';
+const APP_VERSION = '2026.10.21-35';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -92,9 +92,11 @@ function showToast(message) {
 
 // 지금 로그인한 사람과 메뉴별 권한 (/api/me 결과로 채워짐. 로그인 기능이 꺼진 서버에서는 모두 '수정')
 const PERM_LEVEL = { none: 0, view: 1, edit: 2 };
-let ME = { mode: 'none', authed: true, role: 'full', perms: { send: 'edit', history: 'edit', schedule: 'edit', resume: 'edit', templates: 'edit' } };
-function canView(menu) { return (PERM_LEVEL[ME.perms[menu]] || 0) >= 1; }
-function canEdit(menu) { return (PERM_LEVEL[ME.perms[menu]] || 0) >= 2; }
+let ME = { mode: 'none', authed: true, role: 'full', perms: { send: 'edit', history: 'edit', schedule: 'edit', resume: 'edit', interviews: 'edit', templates: 'edit' } };
+// 면접 관리(interviews)는 예전에 "이력서 검토·공고(resume)" 권한으로 보던 화면이라, 그 권한이 있는 사용자도 그대로 보고 고칠 수 있어요(팀장은 interviews 보기만 있어서 읽기 전용이에요)
+const permOf = (menu) => Math.max(PERM_LEVEL[ME.perms[menu]] || 0, menu === 'interviews' ? (PERM_LEVEL[ME.perms.resume] || 0) : 0);
+function canView(menu) { return permOf(menu) >= 1; }
+function canEdit(menu) { return permOf(menu) >= 2; }
 
 const nameInput = document.getElementById('name');
 const phoneInput = document.getElementById('phone');
@@ -976,6 +978,41 @@ function buildGoogleCalendarUrl(s) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+
+// ---------- 오랩 일정에 추가 (오랩 캘린더 https://ohlab.ai/cal 은 주소로 칸을 채울 수 없어서, 오랩 "새 일정"에 넣을 값을 복사해요) ----------
+const ORAB_CAL_URL = 'https://ohlab.ai/cal';
+const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+function orabClock(d) { const h = d.getHours(), m = d.getMinutes(); return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}:${pad2(m)}`; }
+function orabDay(d) { return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY_KO[d.getDay()]})`; }
+// 오랩 "새 일정" 창이 받는 값(제목·날짜·시작–끝·설명). 기본 1시간(지금 구글 링크와 같아요). 지원자 연락처는 넣지 않아요(캘린더는 팀이 같이 봐요).
+function buildOrabFields(s) {
+  const start = new Date(s.interviewAt), end = new Date(start.getTime() + 60 * 60 * 1000);
+  const floorTag = s.team === 'SCM팀' ? '' : '[3F] ';
+  const sameDay = start.toDateString() === end.toDateString();
+  const desc = [s.interviewer ? `면접 진행자: ${s.interviewer}` : '', s.location ? `장소: ${s.location}` : ''].filter(Boolean).join(' / ');
+  return [
+    { key: 'title', label: '제목', value: `${floorTag}${s.team} 면접 - ${s.name}` },
+    { key: 'date', label: '날짜', value: orabDay(start) },
+    { key: 'time', label: '시간', value: `${orabClock(start)} – ${sameDay ? '' : orabDay(end) + ' '}${orabClock(end)}` },
+    ...(desc ? [{ key: 'desc', label: '설명', value: desc }] : []),
+  ];
+}
+async function orabCopy(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch { try { const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); const ok = document.execCommand('copy'); t.remove(); return ok; } catch { return false; } }
+}
+function orabRender(box, s) {
+  const f = buildOrabFields(s);
+  box.hidden = false;
+  box.innerHTML = `<div class="manage-hint" style="margin:0 0 4px">오랩 "새 일정" 창에 아래 값을 넣어주세요. 넣을 곳은 "오랩 일정"을 고르고 "나만 보기"는 꺼야 팀이 봐요.</div>` + f.map(x => `<div class="sch-orab-row"><span class="sch-orab-label">${x.label}</span><span class="sch-orab-value">${escapeHtml(x.value)}</span><button type="button" class="link-btn sch-orab-copy" data-key="${x.key}">복사</button></div>`).join('') + '<div class="sch-orab-msg status" aria-live="polite"></div>';
+  box.onclick = async e => {
+    const b = e.target.closest('.sch-orab-copy'); if (!b) return;
+    const x = f.find(v => v.key === b.dataset.key); const ok = await orabCopy(x.value);
+    const msg = box.querySelector('.sch-orab-msg'); msg.textContent = ok ? `"${x.label}"을 복사했어요.` : '복사하지 못했어요. 값을 직접 선택해서 복사해주세요.'; msg.className = 'sch-orab-msg status' + (ok ? ' ok' : ' err');
+  };
+  return f;
+}
+
 function renderScheduleCard(s, container) {
   container.innerHTML = '';
   const node = scheduleCardTpl.content.cloneNode(true);
@@ -1013,10 +1050,18 @@ function renderScheduleCard(s, container) {
   const cancelBtn = node.querySelector('.sch-cancel-btn');
   const deleteBtn = node.querySelector('.sch-delete-btn');
   const calendarBtn = node.querySelector('.sch-calendar-btn');
+  const orabBtn = node.querySelector('.sch-orab-btn'), orabBox = node.querySelector('.sch-orab-box');
   const statusMsg = node.querySelector('.sch-status-msg');
 
   setupInterviewPanel(card, s);   // 면접 질문 추천(노션 문항 은행 + 이력서 맞춤)
 
+  orabBtn.addEventListener('click', async () => {
+    const f = orabRender(orabBox, s);
+    const ok = await orabCopy(f[0].value);   // 제목을 바로 복사해 두고, 나머지는 칸마다 복사해요
+    const msg = orabBox.querySelector('.sch-orab-msg'); msg.textContent = ok ? `제목을 복사했어요. 오랩 "새 일정"에 붙여넣고, 날짜·시간은 아래 값을 넣어주세요.` : '오랩 캘린더를 열었어요. 아래 값을 직접 복사해서 넣어주세요.'; msg.className = 'sch-orab-msg status' + (ok ? ' ok' : ' err');
+    const win = window.open(ORAB_CAL_URL, '_blank', 'noopener');
+    if (!win) msg.textContent += ' (새 탭이 막혔어요. 팝업을 허용하거나 오랩 캘린더를 직접 열어주세요)';
+  });
   calendarBtn.addEventListener('click', () => {
     try {
       const url = buildGoogleCalendarUrl(s);
@@ -3999,7 +4044,7 @@ async function loadBenchmark(positionId) {
 }
 
 // ---------- 로그인 정보 · 메뉴별 권한 · 왼쪽 하단 도크 ----------
-const MENU_KEYS = ['send', 'history', 'schedule', 'resume', 'templates'];
+const MENU_KEYS = ['send', 'history', 'schedule', 'resume', 'interviews', 'templates'];
 const noAccessEl = document.getElementById('noAccess');
 const userDock = document.getElementById('userDock');
 const dockName = document.getElementById('dockName');
@@ -4008,7 +4053,14 @@ const openAdminBtn = document.getElementById('openAdminBtn');
 const dockLogoutBtn = document.getElementById('dockLogoutBtn');
 const sendReadonlyNote = document.getElementById('sendReadonlyNote');
 
+function renderLeadNote() {
+  const el = document.getElementById('apLeadNote'); if (!el) return;
+  const lead = ME.role === 'teamlead';
+  el.hidden = !lead;
+  if (lead) el.textContent = `${(ME.teams || []).join('·')} 면접 기록만 보여요(보기 전용). 다른 팀과 수정·문자 발송은 소유주에게 요청해주세요.`;
+}
 function applyPermissions() {
+  renderLeadNote();
   MENU_KEYS.forEach(m => {
     document.body.classList.toggle('no-view-' + m, !canView(m));
     document.body.classList.toggle('no-edit-' + m, !canEdit(m));
@@ -4036,7 +4088,7 @@ function initDock() {
   userDock.hidden = false;
   document.body.classList.add('has-dock');
   dockName.textContent = ME.name || '로그인됨';
-  dockRole.textContent = ME.role === 'owner' ? '소유주' : '';
+  dockRole.textContent = ME.role === 'owner' ? '소유주' : (ME.role === 'teamlead' ? `팀장 · ${(ME.teams || []).join('·')}` : '');
   openAdminBtn.hidden = !ME.canManage;
 }
 dockLogoutBtn.addEventListener('click', async () => {
@@ -4217,7 +4269,7 @@ function apFmtWhen(v) {
   const t = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? v : apToLocalInput(v);
   return t ? `${+t.slice(5, 7)}/${+t.slice(8, 10)} ${t.slice(11, 16)}` : '-';
 }
-function apCanEdit() { return !document.body.classList.contains('no-edit-resume'); }
+function apCanEdit() { return !document.body.classList.contains('no-edit-interviews'); }
 
 // 문자 보내기의 면접 일정과 비교한 상태 배지 + 맞추기 버튼
 const AP_SCH_LABEL = { match: ['✓ 일정과 일치', 'ok'], diff: ['⚠ 일정과 달라요', 'warn'], notion_only: ['일정에 없어요', 'muted'], schedule_only: ['노션에 없어요', 'warn'], date_only: ['날짜만 일치', 'muted'] };

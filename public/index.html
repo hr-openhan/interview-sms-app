@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-app-version="2026.10.21-33">
+<html lang="ko" data-app-version="2026.10.21-35">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,7 +15,7 @@
       </div>
       <nav class="tabs">
         <button class="tab-btn active" data-tab="resume" data-group="manage" data-menus="resume">공고 관리</button>
-        <button class="tab-btn" data-tab="interview" data-menus="resume">면접 관리</button>
+        <button class="tab-btn" data-tab="interview" data-menus="interviews resume">면접 관리</button>
         <button class="tab-btn" data-tab="send" data-menus="send history schedule">문자 보내기</button>
         <button class="tab-btn" data-tab="manage" data-menus="templates">양식 관리</button>
       </nav>
@@ -837,8 +837,9 @@
     </div>
 
     <div id="interviewView" class="resume-view" hidden>
-      <section class="panel" data-menu="resume">
+      <section class="panel" data-menu="interviews">
         <h2>면접 관리</h2>
+        <p class="manage-hint ap-lead-note" id="apLeadNote" hidden></p>
         <p class="manage-hint">노션 「진행중 채용」과 <strong>같은 데이터</strong>예요. 바꾸면 노션에 바로 반영돼요. 탈락·채용은 AI가 아니라 <strong>사람이 직접</strong> 바꿔요.</p>
           <details class="help"><summary>자세히 보기</summary><p class="manage-hint">노션에서 바꾼 내용은 <strong>새로고침</strong>하면 여기에도 보여요. 면접 일정이 <strong>문자 보내기의 면접 일정과 맞는지</strong> 배지로 비교해 주고, <strong>📨 면접 문자·📅 일정</strong>으로 문자·일정 화면을 채울 수 있어요. 줄의 <strong>면접 질문·답변</strong>을 누르면 아래에서 맞춤 질문을 만들고 <strong>답변·점수(⭐)를 적어 노션에 전송</strong>해요.</p></details>
         <p class="status err" id="apNotice" hidden></p>
@@ -1021,8 +1022,10 @@
     <div class="tpl-card">
       <div class="tpl-card-head">
         <h3 class="sch-name-view"></h3>
+        <div class="sch-orab-box" hidden></div>
         <div class="tpl-card-actions">
-          <button class="sch-calendar-btn">구글캘린더에 추가</button>
+          <button class="sch-orab-btn" type="button" title="오랩 캘린더를 열고, 새 일정에 넣을 값을 복사해요">오랩 일정에 추가</button>
+          <button class="sch-calendar-btn link-btn" type="button" title="구글캘린더 새 일정 창을 열어요">구글캘린더</button>
           <button class="sch-iq-btn" type="button" title="노션 문항 은행과 이력서를 바탕으로 면접 질문을 추천해요">면접 질문 추천</button>
           <button class="sch-edit-btn" data-edit="schedule">수정</button>
           <button class="sch-save-btn" hidden>저장</button>

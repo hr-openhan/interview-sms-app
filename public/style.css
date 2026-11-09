@@ -1389,7 +1389,7 @@ body {
 .no-view-send [data-menu="send"],
 .no-view-history [data-menu="history"],
 .no-view-schedule [data-menu="schedule"],
-.no-view-resume [data-menu="resume"],
+.no-view-resume [data-menu="resume"], .no-view-interviews [data-menu="interviews"],
 .no-view-templates [data-menu="templates"],
 .no-edit-send [data-edit="send"],
 .no-edit-history [data-edit="history"],
@@ -2142,3 +2142,10 @@ details.help > p { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid v
 
 /* 발송 이력 보기 범위 */
 .history-scope { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 4px 0 10px; }
+
+/* 오랩 일정에 추가 */
+.sch-orab-box { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #faf7f0; font-size: 13px; }
+.sch-orab-row { display: flex; gap: 8px; align-items: baseline; margin: 3px 0; flex-wrap: wrap; }
+.sch-orab-label { flex: 0 0 38px; color: #7a7466; }
+.sch-orab-value { flex: 1 1 160px; word-break: keep-all; overflow-wrap: anywhere; }
+.sch-orab-msg { margin: 4px 0 0; min-height: 0; }
