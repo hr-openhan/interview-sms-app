@@ -28,6 +28,8 @@ body {
   margin: 0 auto;
   padding: 48px 24px 80px;
 }
+/* 면접 관리 탭: 옆 여백을 줄이고 화면 폭을 넓게 써요(아주 넓은 모니터에서는 1680px까지) */
+body.wide-tab .wrap { max-width: 1680px; padding-left: 20px; padding-right: 20px; }
 
 .topbar {
   display: flex;

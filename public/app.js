@@ -1,5 +1,5 @@
 // 서버(server.js)의 APP_VERSION과 같아야 해요. 다르면 화면 맨 위에 "파일 버전이 서로 달라요" 경고가 떠요.
-const APP_VERSION = '2026.10.21-43';
+const APP_VERSION = '2026.10.21-45';
 
 // ---------- 파일 버전 확인 (이 블록은 파일 맨 앞에서, 아래 코드가 오류로 멈추더라도 독립적으로 실행돼요) ----------
 // 서버·index.html·app.js가 서로 다른 시기의 파일이면 화면이 멈추거나 데이터가 비어 보일 수 있어서, 그 사실을 사용자에게 바로 알려줘요.
@@ -191,6 +191,21 @@ const scheduleListBody = document.getElementById('scheduleListBody');
 let templates = [];
 let schedules = [];
 
+// 기본 양식으로 바꾸기(소유주만): 같은 번호의 양식 본문을 앱의 기본 양식으로 바꾸고, 따로 만든 양식은 그대로 둬요
+(function () {
+  const btn = document.getElementById('applyDefaultTplBtn'); if (!btn) return;
+  const sync = () => { btn.hidden = !(typeof ME !== 'undefined' && ME && (ME.role === 'owner' || ME.role === 'full')); };
+  setTimeout(sync, 1500); document.addEventListener('visibilitychange', sync);
+  btn.addEventListener('click', async () => {
+    if (!confirm('기본 양식(t1~t17)의 이름·본문을 앱에 들어 있는 새 기본 양식으로 바꿀까요?\n\n같은 번호의 양식은 지금 내용이 덮어써지고, 따로 만든 양식은 그대로 남아요.')) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/templates/apply-defaults', { method: 'POST' }); const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || '바꾸지 못했어요.'); return; }
+      await loadTemplates(); alert(`기본 양식으로 바꿨어요. 바뀐 양식 ${j.replaced}개, 새로 생긴 양식 ${j.added}개, 그대로 둔 양식 ${j.kept}개예요.`);
+    } catch { alert('서버에 연결하지 못했어요.'); } finally { btn.disabled = false; }
+  });
+})();
 async function loadTemplates() {
   if (!canView('send') && !canView('templates')) return;
   templateSelect.innerHTML = '<option value="">불러오는 중...</option>';
@@ -734,6 +749,7 @@ function showTab(tab) {
   tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.dataset.group === 'manage' && (tab === 'resume' || tab === 'posting'))));
   document.querySelectorAll('.manage-subnav .sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === tab));
   sendView.hidden = tab !== 'send';
+  document.body.classList.toggle('wide-tab', tab === 'interview');   // 면접 관리는 화면 가로 폭을 넓게 써요(목록·칸반이 한눈에 보이게)
   resumeView.hidden = tab !== 'resume';
   postingView.hidden = tab !== 'posting';
   interviewView.hidden = tab !== 'interview';
@@ -4237,6 +4253,7 @@ async function bootApp() {
     const first = applyPermissions();
     initDock();
     if (first) showTab(first);
+    lnRefresh();   // 노션 → 앱 옮기기 상자(소유주·노션 모드일 때만)
     if (canView('history')) loadHistory();
     if (canView('schedule')) { loadTeams(); loadInterviewers(); loadLocations(); loadRounds(); loadSchedules(); }
   } finally {
@@ -4437,14 +4454,15 @@ function apdInfoHtml(x) {
   return '<dl class="apd-dl">' + rows.filter(r => r[1]).map(r => `<dt>${escapeHtml(r[0])}</dt><dd>${escapeHtml(r[1])}</dd>`).join('') + '</dl>';
 }
 function apdRenderNotes() {
-  const n = apd.note || {}; const canEdit = apCanEdit();
+  const n = apd.note || {}; const canEdit = apCanEdit() || ME.role === 'teamlead';   // 팀장도 자기 팀 면접 대상자의 면접 내용을 써요(서버가 팀을 확인해요)
   document.getElementById('apdNotes').innerHTML = APD_SECTIONS.map(([k, label, ph]) => {
     const cur = n[k]; const who = cur ? `${escapeHtml(cur.name || '')}님이 ${escapeHtml(apdWhen(cur.at))}에 씀` : '아직 쓰지 않았어요';
     return `<div class="apd-section" data-sec="${k}"><label for="apd-${k}"><strong>${label}</strong></label><textarea id="apd-${k}" data-sec="${k}" rows="${k === 'opinion' ? 4 : 7}" maxlength="8000" placeholder="${escapeHtml(ph)}"${canEdit ? '' : ' readonly'}>${escapeHtml(cur ? cur.text : '')}</textarea><div class="apd-row"><span class="ap-sub apd-who">${who}</span>${canEdit ? `<button type="button" class="add-btn apd-save" data-sec="${k}">저장</button>` : ''}</div></div>`;
   }).join('');
   const cs = n.comments || [];
-  document.getElementById('apdComments').innerHTML = cs.length ? cs.map(c => `<div class="apd-comment" data-cid="${escapeHtml(c.id)}"><div class="ap-sub">${escapeHtml(c.name || '')} · ${escapeHtml(apdWhen(c.at))}${canEdit && (!ME.email || ME.email === c.by || ME.role === 'owner') ? ` <button type="button" class="link-btn apd-cdel" data-cid="${escapeHtml(c.id)}">삭제</button>` : ''}</div><div class="apd-ctext">${escapeHtml(c.text)}</div></div>`).join('') : '<p class="ap-sub">아직 댓글이 없어요.</p>';
-  document.getElementById('apdCommentForm').hidden = !canEdit;
+  const canComment = canEdit;   // 팀장도 자기 팀 지원자에 의견 댓글을 쓸 수 있어요(서버가 팀을 확인해요)
+  document.getElementById('apdComments').innerHTML = cs.length ? cs.map(c => `<div class="apd-comment" data-cid="${escapeHtml(c.id)}"><div class="ap-sub">${escapeHtml(c.name || '')} · ${escapeHtml(apdWhen(c.at))}${canComment && (!ME.email || ME.email === c.by || ME.role === 'owner') ? ` <button type="button" class="link-btn apd-cdel" data-cid="${escapeHtml(c.id)}">삭제</button>` : ''}</div><div class="apd-ctext">${escapeHtml(c.text)}</div></div>`).join('') : '<p class="ap-sub">아직 댓글이 없어요.</p>';
+  document.getElementById('apdCommentForm').hidden = !canComment;
   const hasAny = !!(n.r1 || n.r2 || n.opinion || (n.comments || []).length);
   const delBox = document.getElementById('apdDeleteBox'); const canDeleteAll = ME.role === 'owner' || ME.role === 'full';   // 서버도 소유주만 허용해요(비밀번호 로그인은 모두 전체 권한)
   delBox.hidden = !(canDeleteAll && hasAny);
@@ -4454,13 +4472,32 @@ async function apdFetchNote(id) {
   const res = await fetch('/api/interview-notes/' + encodeURIComponent(id)); const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || '면접 기록을 불러오지 못했어요.'); return j.note;
 }
+// 노션 → 앱 저장소 옮기기(소유주·전체 권한만, 노션 모드일 때만 보여요)
+async function lnRefresh() {
+  const box = document.getElementById('lnBox'); if (!box) return;
+  if (!(ME.role === 'owner' || ME.role === 'full')) { box.hidden = true; return; }
+  try { const r = await fetch('/api/data-source'); const d = await r.json(); box.hidden = !(r.ok && d.mode !== 'local' && d.notionToken && !d.envForced); if (d.progress) document.getElementById('lnProg').textContent = `지난번에 ${d.progress.pages}명까지 옮겼어요. 누르면 이어서 옮겨요.`; } catch { box.hidden = true; }
+}
+document.getElementById('lnStart').addEventListener('click', async () => {
+  const btn = document.getElementById('lnStart'), prog = document.getElementById('lnProg');
+  if (!confirm('노션의 지원자 정보를 앱으로 옮길까요?\n옮긴 뒤에는 앱 저장소만 써요. 노션 내용은 지우지 않아요.')) return;
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < 400; i++) {
+      const r = await fetch('/api/data-source/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const d = await r.json().catch(() => ({}));
+      if (!r.ok) { prog.textContent = d.error || '옮기지 못했어요. 다시 누르면 이어서 옮겨요.'; return; }
+      prog.textContent = `옮기는 중... ${d.counts ? d.counts.pages : 0}명`;
+      if (d.done) { prog.textContent = `다 옮겼어요: ${d.counts.pages}명, 면접 문항 표 ${d.counts.dbs}개. 이제 노션 없이 동작해요.`; notionStatus = null; setTimeout(() => location.reload(), 1500); return; }
+    }
+  } catch { prog.textContent = '서버에 연결하지 못했어요. 다시 누르면 이어서 옮겨요.'; } finally { btn.disabled = false; }
+});
 async function openApplicantDetail(id) {
   const x = apList.find(v => v.id === id) || (apKanbanList || []).find(v => v.id === id) || (apMonthData && apMonthData.applicants.find(v => v.id === id)); if (!x) return;
   Object.assign(apd, { id, x, note: null, loading: true }); apd.dirty.clear();
   document.getElementById('apdTitle').textContent = `${x.name || '(이름 없음)'}${x.team ? ' · ' + x.team : ''}`;
   document.getElementById('apdStatus').textContent = x.status || '';
   document.getElementById('apdInfo').innerHTML = apdInfoHtml(x); document.getElementById('apdCard').textContent = '불러오는 중...'; document.getElementById('apdNotes').innerHTML = ''; document.getElementById('apdComments').innerHTML = ''; apdMsg('');
-  const lead = ME.role === 'teamlead'; const note = document.getElementById('apdLeadNote'); note.hidden = !(lead || !apCanEdit()); note.textContent = lead ? `${(ME.teams || []).join('·')} 면접 기록만 보여요(보기 전용). 쓰기는 소유주에게 요청해주세요.` : '보기 전용이에요(수정 권한이 없어요).';
+  const lead = ME.role === 'teamlead'; const note = document.getElementById('apdLeadNote'); note.hidden = !(lead || !apCanEdit()); note.textContent = lead ? `${(ME.teams || []).join('·')} 면접 대상자만 보여요. 면접 내용과 의견 댓글을 쓸 수 있어요.` : '보기 전용이에요(수정 권한이 없어요).';
   apdEl.hidden = false; document.body.classList.add('apd-open'); document.getElementById('apdClose').focus();
   try { apd.note = await apdFetchNote(id); apdRenderNotes(); } catch (err) { apdMsg(err.message, 'err'); }
   apd.loading = false;
@@ -4580,7 +4617,7 @@ async function loadApplicants(reset) {
     if (!apOptions || reset && !apOptions.statuses) apOptions = st.options || {};
     if (!apStatus.options.length) {
       const sts = (st.options && st.options.statuses) || [];
-      apStatus.innerHTML = `<option value="active">진행 중 (서류합격~2차 면접)</option><option value="all">전체</option>` + sts.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+      apStatus.innerHTML = `<option value="active">진행 중 (서류합격~2차 면접)</option><option value="all">전체</option>` + sts.filter(s => AP_VISIBLE.includes(s)).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
       apFillTeamOptions();   // 팀 선택은 앱의 공식 11개 팀만(노션에 남은 옛 팀 선택지는 숨겨요)
       apOptions = st.options || {};
       const link = document.getElementById('apNotionLink');
@@ -4812,6 +4849,7 @@ document.getElementById('apThisMonth').addEventListener('click', () => { apMonth
 let apKanbanList = []; let apKanbanTruncated = false; let apKanbanLoading = false; let apKanbanDragId = '';
 // 칸반의 접힌 열: 진행 중이 아닌 상태(탈락 확정 845명처럼 많은 열)는 펼칠 때만 그 상태만 불러와요
 const AP_KB_BOARD = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정', '탈락 후보'];   // 서버의 status=board 와 같아요
+const AP_VISIBLE = [...AP_KB_BOARD, '채용'];   // 앱에서 보는 상태(서버의 NOTION_VISIBLE_STATUSES와 같아요). 탈락 확정·불참·퇴사는 노션에만 있어요
 const AP_KB_COLUMN_MAX = 100;
 const apKbOpen = new Set(); let apKbExtra = {};   // 펼친 열 / 열별로 따로 불러온 지원자
 async function loadKanbanColumn(status, quiet) {
@@ -4859,9 +4897,9 @@ function apRenderKanban() {
   const cols = apKanbanColumns(); const canMove = apCanEdit(); const by = new Map(cols.map(c => [c, []]));
   apKanbanList.forEach(x => by.get(x.status || '(상태 없음)').push(x));
   by.forEach(list => list.sort((p, q) => String(p.name).localeCompare(String(q.name), 'ko')));
-  document.getElementById('apKanbanSummary').innerHTML = apKanbanList.length ? `전체 <strong>${apKanbanList.length}명</strong> · ${cols.filter(c => AP_KB_BOARD.includes(c) || c === '(상태 없음)').map(c => `${escapeHtml(c)} ${by.get(c).length}`).join(' · ')} · 탈락 확정 등 나머지 열은 펼칠 때 불러와요` : '표시할 지원자가 없어요.';
+  document.getElementById('apKanbanSummary').innerHTML = apKanbanList.length ? `전체 <strong>${apKanbanList.length}명</strong> · ${cols.filter(c => AP_KB_BOARD.includes(c) || c === '(상태 없음)').map(c => `${escapeHtml(c)} ${by.get(c).length}`).join(' · ')} · 채용 열은 펼칠 때 불러와요. 탈락 확정·불참·퇴사는 앱에 보이지 않아요(노션에는 그대로)` : '표시할 지원자가 없어요.';
   const collapsible = c => !AP_KB_BOARD.includes(c) && c !== '(상태 없음)';   // 진행 중이 아닌 상태는 접어 둬요
-  document.getElementById('apKanbanBoard').innerHTML = cols.map(c => {
+  document.getElementById('apKanbanBoard').innerHTML = cols.filter(c => AP_VISIBLE.includes(c) || c === '(상태 없음)').map(c => {   // 옮기기 선택지(cols)는 그대로 두고 열만 보이는 상태로
     if (collapsible(c)) {
       const open = apKbOpen.has(c); const ex = apKbExtra[c];
       const cards = open && ex ? ex.list.slice().sort((p, q) => String(p.name).localeCompare(String(q.name), 'ko')).map(x => apKanbanCardHtml(x, cols, canMove)).join('') : '';
