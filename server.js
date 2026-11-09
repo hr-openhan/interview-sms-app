@@ -234,7 +234,13 @@ function leadTeamsOf(email) {
   return t ? [...t] : null;
 }
 // 팀장이면 그 팀의 것만 true. 소유주·일반 사용자(teams 없음)는 제한 없음. 팀 이름이 비어 있으면 팀장에게는 안 보여요.
-const teamAllowed = (user, team) => !user || !user.teams || user.teams.includes(String(team || '').trim());
+// 노션의 팀 이름은 앱과 다를 수 있어요(글로벌비즈니스팀=글로벌팀, 와우서비스팀=와우팀 …, 팀장을 뽑는 지원자는 "마케팅팀장"처럼). 같은 팀으로 보는 이름을 모두 모아요.
+function teamKeysOf(teams) {
+  const set = new Set();
+  for (const t of teams || []) { set.add(t); if (typeof TEAM_ALIASES !== 'undefined' && TEAM_ALIASES[t]) set.add(TEAM_ALIASES[t]); set.add(t + '장'); }
+  return [...set];
+}
+const teamAllowed = (user, team) => !user || !user.teams || (user.teamKeys || user.teams).includes(String(team || '').trim());
 function normalizePerms(p) {
   const out = {};
   for (const m of MENUS) out[m.key] = p && Object.prototype.hasOwnProperty.call(LEVELS, p[m.key]) ? p[m.key] : 'none';
@@ -315,7 +321,7 @@ async function resolveUser(email) {
     return { email: e, name: (stored && stored.name) || e.split('@')[0], role: 'owner', perms: { ...ALL_EDIT } };
   }
   const lead = leadTeamsOf(e);   // 팀장은 저장된 사용자가 아니어도 입장하고, 저장된 권한과 겹쳐도 더 좁은 팀장 권한을 써요
-  if (lead) return { email: e, name: (stored && stored.name) || e.split('@')[0], role: 'teamlead', teams: lead, perms: { ...normalizePerms({}), schedule: 'view', interviews: 'view' } };
+  if (lead) return { email: e, name: (stored && stored.name) || e.split('@')[0], role: 'teamlead', teams: lead, teamKeys: teamKeysOf(lead), perms: { ...normalizePerms({}), schedule: 'view', interviews: 'view' } };
   if (!stored || stored.active === false) return null;
   return { email: e, name: stored.name || e.split('@')[0], role: 'member', perms: normalizePerms(stored.perms) };
 }
@@ -333,7 +339,7 @@ async function getAuth(req) {
 }
 
 // 서버·화면(app.js)·index.html이 같은 버전인지 화면이 확인하는 데 씀. 이 값을 바꿀 때는 public/app.js의 APP_VERSION도 같은 값으로 바꿔야 해요(시험이 확인).
-const APP_VERSION = '2026.10.21-35';
+const APP_VERSION = '2026.10.21-36';
 const AUTH_PUBLIC_PATHS = new Set([
   '/login.html', '/style.css', '/favicon.ico',
   '/api/login', '/api/auth-status', '/api/me', '/api/auth/google', '/api/auth/google/callback',
@@ -4189,6 +4195,7 @@ const NOTION_DB_ID = String(process.env.NOTION_DATABASE_ID || '3a6e1184cb9340a0a
 const NOTION_API_BASE = process.env.NOTION_API_BASE || 'https://api.notion.com';
 const NOTION_SMS_DONE = '문자 발송 완료';
 const NOTION_ACTIVE_STATUSES = ['서류합격', '1차 면접 예정자', '채용 과제', '2차 면접 예정'];
+const NOTION_BOARD_STATUSES = [...NOTION_ACTIVE_STATUSES, '탈락 후보'];   // 칸반이 처음에 불러오는 진행 중 열(노션 팀별 보기와 같은 5개). 탈락 확정·불참·퇴사·채용은 열을 펼칠 때만 불러와요
 
 // 이 앱이 읽고 쓰는 노션 칸과 종류. 칸 이름이 바뀌거나 종류가 달라지면 '연결 상태'에서 알려줍니다.
 const NOTION_REQUIRED_PROPS = {
@@ -4419,13 +4426,14 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     const month = /^(20\d{2})-(0[1-9]|1[0-2])$/.test(monthRaw) ? monthRaw : '';   // 면접이 있는 달(YYYY-MM)
     if (monthRaw && !month) return res.status(400).json({ error: '월은 YYYY-MM 형식(예: 2026-10)으로 골라주세요.' });
     const filters = [];
-    const leadUser = req.auth && req.auth.user; const leadTeams = leadUser && leadUser.teams ? leadUser.teams : null;   // 팀장이면 요청이 뭐든 자기 팀만(화면이 필터를 안 걸어도, 주소를 직접 불러도)
+    const leadUser = req.auth && req.auth.user; const leadTeams = leadUser && leadUser.teams ? (leadUser.teamKeys || leadUser.teams) : null;   // 팀장이면 요청이 뭐든 자기 팀만(화면이 필터를 안 걸어도, 주소를 직접 불러도)
     if (q) filters.push({ property: '이름', title: { contains: q } });
     if (leadTeams) {
-      if (team && !leadTeams.includes(team)) return res.json({ applicants: [], hasMore: false, nextCursor: '', scheduleChecked: false, month: '', byTeam: null, truncated: false });   // 담당이 아닌 팀을 요청하면 빈 결과
-      filters.push({ or: (team ? [team] : leadTeams).map(t => ({ property: '팀명', select: { equals: t } })) });
-    } else if (team) filters.push({ property: '팀명', select: { equals: team } });
-    if (status === 'active') filters.push({ or: NOTION_ACTIVE_STATUSES.map(s => ({ property: '면접상태', select: { equals: s } })) });
+      const asked = team ? teamKeysOf([team]).filter(k => leadTeams.includes(k)) : leadTeams;   // 요청한 팀(앱 이름이든 노션 이름이든)이 담당 팀이면 그 이름들로, 아니면 빈 결과
+      if (team && !asked.length) return res.json({ applicants: [], hasMore: false, nextCursor: '', scheduleChecked: false, month: '', byTeam: null, truncated: false });
+      filters.push({ or: asked.map(t => ({ property: '팀명', select: { equals: t } })) });
+    } else if (team) filters.push({ or: teamKeysOf([team]).map(t => ({ property: '팀명', select: { equals: t } })) });   // 팀장이 아닌 사람의 팀 필터도 노션의 다른 이름(별칭)까지 찾아요
+    if (status === 'active' || status === 'board') filters.push({ or: (status === 'board' ? NOTION_BOARD_STATUSES : NOTION_ACTIVE_STATUSES).map(s => ({ property: '면접상태', select: { equals: s } })) });
     else if (status && status !== 'all') filters.push({ property: '면접상태', select: { equals: status } });
     const size = Math.max(1, Math.min(parseInt(req.query.pageSize, 10) || 30, 100));
     const cursor = String(req.query.cursor || '').slice(0, 200);
@@ -4439,7 +4447,7 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
     if (filters.length === 1) body.filter = filters[0];
     else if (filters.length > 1) body.filter = { and: filters };
     const data = await notionRequest('POST', `/v1/databases/${NOTION_DB_ID}/query`, body);
-    let applicants = (data.results || []).map(pageToApplicant);
+    let applicants = (data.results || []).map(pageToApplicant).filter(a => !isReferencePage(a));   // 인재상·면접 질문지 같은 참고 페이지는 지원자가 아니라서 빼요
     // 면접 일정(문자 보내기)과 짝지어 일치 여부도 함께 돌려줌. 일정에는 이름·연락처·장소가 있어서 "면접 일정 보기" 권한이 있을 때만 붙여요.
     const user = req.auth && req.auth.user;
     const canSeeSchedules = AUTH_MODE !== 'google' || hasPerm(user, 'schedule', 'view');
@@ -4462,6 +4470,8 @@ app.get('/api/notion/applicants', requireNotion, ah(async (req, res) => {
   }
 }));
 
+// 노션 「진행중 채용」 안에는 지원자가 아닌 참고 페이지(면접 질문지·오픈한 인재상·대학 순위·채용과제 리스트)도 들어 있어요: 팀명이 "면접정보"이거나, 상태·전화번호·팀이 모두 비어 있는 페이지
+const isReferencePage = a => !!a && (a.team === '면접정보' || (!a.status && !a.phone && !a.team));
 // 노션 날짜 칸에 쓸 값 만들기: '' → 지우기, 'YYYY-MM-DD' → 날짜, 'YYYY-MM-DDTHH:mm' → 한국 시간(+09:00) 일시
 function toNotionDate(v, label) {
   const bad = () => { const e = new Error(`${label} 날짜 형식이 올바르지 않아요.`); e.status = 400; return e; };
